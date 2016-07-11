@@ -33,3 +33,6 @@ lint-report/
 .gradle/
 *.iml
 *.idea
+
+#Garbage
+.DS_Store
