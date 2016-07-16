@@ -1,5 +1,6 @@
 package com.ath.fuel;
 
+import android.app.Application;
 import android.content.Context;
 
 public class FuelBaseObject {
@@ -7,8 +8,11 @@ public class FuelBaseObject {
     /**
      * Will use an Application Context
      */
-    public FuelBaseObject() {
-        FuelInjector.ignite( FuelInjector.getGenericContext(), this );
+    public FuelBaseObject( Application app ) {
+        if ( app == null ) {
+            throw new NullPointerException( getClass().getSimpleName() + " got a null Context" );
+        }
+        FuelInjector.ignite( app, this );
         onFueled();
     }
 
@@ -18,11 +22,10 @@ public class FuelBaseObject {
      */
     public FuelBaseObject( Context context ) {
         if ( context == null ) {
-            throw new NullPointerException( getClass().getSimpleName() + " got a null Context, did you forget to call super( context ) in the constructor?" );
+            throw new NullPointerException( getClass().getSimpleName() + " got a null Context" );
         }
 
         FuelInjector.ignite( context, this );
-
         onFueled();
     }
 
