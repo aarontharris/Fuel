@@ -26,7 +26,6 @@ import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedList;
-import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
 import java.util.Queue;
@@ -49,7 +48,6 @@ public final class FuelInjector {
 	private static ReentrantReadWriteLock cacheLock = new ReentrantReadWriteLock();
 	private static final WeakHashMap<Object, Lazy> lazyCache = new WeakHashMap<>(); // parent -> LazyParent
 	private static WeakHashMap<Object, Queue<Lazy>> preprocessQueue = new WeakHashMap<>(); // LazyParent -> Queue<LazyChildren>
-	private static WeakHashMap<Lazy, WeakReference<Lazy>> weakLazyParentCache = new WeakHashMap<>(); // LazyParent -> WeakLazyParent
 
 	// private static WeakHashMap<Object, WeakReference<Context>> objectToContext = new WeakHashMap<>();
 
@@ -161,19 +159,6 @@ public final class FuelInjector {
 
 	static void rememberLazyByInstance( Object instance, Lazy lazy ) {
 		lazyCache.put( instance, lazy );
-	}
-
-
-	private WeakHashMap<Object, List<Exception>> igniteCount;
-
-
-	static WeakReference<Lazy> attainWeakLazy( Lazy lazy ) {
-		WeakReference<Lazy> out = weakLazyParentCache.get( lazy );
-		if ( out == null ) {
-			out = new WeakReference<Lazy>( lazy );
-			weakLazyParentCache.put( lazy, out );
-		}
-		return out;
 	}
 
 	/**
