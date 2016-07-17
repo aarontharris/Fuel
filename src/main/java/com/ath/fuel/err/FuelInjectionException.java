@@ -1,7 +1,7 @@
-package com.ath.fuel;
+package com.ath.fuel.err;
 
 @SuppressWarnings("serial")
-public class FuelInjectionException extends Exception {
+public class FuelInjectionException extends RuntimeException {
 
     public FuelInjectionException( Exception exception ) {
         super( exception );

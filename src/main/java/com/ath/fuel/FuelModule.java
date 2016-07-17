@@ -15,9 +15,10 @@ import android.view.View;
 import android.widget.AdapterView;
 import android.widget.ArrayAdapter;
 
+import com.ath.fuel.err.FuelInjectionException;
+import com.ath.fuel.err.FuelUnableToObtainInstanceException;
+
 import java.lang.reflect.Constructor;
-import java.lang.reflect.InvocationTargetException;
-import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -25,11 +26,6 @@ import java.util.HashSet;
 import java.util.List;
 
 public abstract class FuelModule {
-
-	public static interface OnLazyGetFailed {
-		public void onFail( FuelInjectionException e );
-	}
-
 
 	/**
 	 * Provider is cached with the context associated with the type it returns<br>
@@ -80,7 +76,6 @@ public abstract class FuelModule {
 		public abstract T get( Context context );
 	}
 
-	private OnLazyGetFailed lazyGetFailedListener;
 	private final HashMap<Class<?>, Class<?>> classToClassMap = new HashMap<Class<?>, Class<?>>();
 	private final HashMap<Class<?>, Object> classToObjectMap = new HashMap<Class<?>, Object>();
 	private final HashMap<Class<?>, FuelProvider> classToProviderMap = new HashMap<Class<?>, FuelModule.FuelProvider>();
@@ -187,9 +182,25 @@ public abstract class FuelModule {
 	/**
 	 * Called whenever a new instance is obtained by Fuel.<br>
 	 * For Singletons it should only be once per scope.<br>
-	 * Does not get called for non singletons.<br>
+	 * Only called for Singletons.
 	 */
+	@CallSuper
 	protected void onObtainNewSingleton( Object instance ) {
+		if ( instance instanceof OnFueled ) {
+			( (OnFueled) instance ).onFueled();
+		}
+	}
+
+
+	/**
+	 * Called when a critical failure occurs and Fuel is unable to recover.<br>
+	 * Please see derived types of {@link FuelInjectionException} for details on conditions that may cause this method to be called.
+	 *
+	 * @param lazy the culprit
+	 * @param exception what went wrong
+	 */
+	protected void onFailure( Lazy lazy, FuelInjectionException exception ) {
+		throw exception;
 	}
 
 	/**
@@ -250,14 +261,6 @@ public abstract class FuelModule {
 		return null;
 	}
 
-	protected void setOnLazyGetFailedListener( OnLazyGetFailed listener ) {
-		this.lazyGetFailedListener = listener;
-	}
-
-	OnLazyGetFailed getOnLazyGetFailedListener() {
-		return this.lazyGetFailedListener;
-	}
-
 	protected void logD( String message ) {
 		android.util.Log.d( FLog.TAG, message );
 	}
@@ -288,14 +291,12 @@ public abstract class FuelModule {
 	 * <pre>
 	 * Override to set up your own injection configurations here.
 	 * Call super.configure() for default configurations.
-	 *
 	 * Default Configurations (Overridable here)
 	 *  {@link LayoutInflater}
 	 *  {@link ConnectivityManager}
 	 *  {@link AlarmManager}
 	 *  {@link LocationManager}
 	 *  {@link NotificationManager}
-	 *
 	 * Automatically handed by FuelInjector (not Overridable)
 	 *   {@link Context} -- Will attempt to inject Activity but will fall back on Application.
 	 *   {@link Activity} -- Will only inject Activity, unlike Context
@@ -477,7 +478,7 @@ public abstract class FuelModule {
 			if ( lazy.isDebug() ) {
 				FLog.leaveBreadCrumb( "obtainInstance Exception %s", e.getMessage() );
 			}
-			throw new FuelInjectionException( e );
+			FuelInjector.doFailure( lazy, new FuelUnableToObtainInstanceException( e ) );
 		}
 		if ( lazy.isDebug() ) {
 			FLog.leaveBreadCrumb( "obtainInstance fell through to return null" );
@@ -580,47 +581,12 @@ public abstract class FuelModule {
 		if ( lazy.isDebug() ) {
 			FLog.leaveBreadCrumb( "initializeNewInstance for %s", lazy );
 		}
-		FuelInjector.doPostProcess( lazy, lazy.getContext() );
-		doAnnotationProcessing( lazy.instance );
+		FuelInjector.doPostProcess( lazy );
 
 		if ( FuelInjector.isSingleton( lazy.leafType ) ) { // TODO: could totally cache lazy.isSingleton ... later.
 			onObtainNewSingleton( lazy.instance );
 		}
 		return lazy.instance;
-	}
-
-	Object doAnnotationProcessing( Object o ) throws Exception {
-		return doAnnotLazyInject( o );
-	}
-
-	/**
-	 * @param o, no nulls
-	 * @return
-	 * @throws Exception
-	 */
-	private Object doAnnotLazyInject( Object o ) throws Exception {
-		if ( o == null ) {
-			throw new NullPointerException( "Tried to do Annotation Processing on a null instance" );
-		}
-		try {
-			// FIXME: pre-compile a list of methods with annotations and use that list instead of dynamically finding them
-			Method method = o.getClass().getDeclaredMethod( "fuelInit", (Class[]) null );
-			method.setAccessible( true );
-			if ( method.isAnnotationPresent( LazyInject.class ) ) {
-				method.invoke( o, (Object[]) null );
-			}
-		} catch ( InvocationTargetException ite ) {
-			FLog.w( "Cannot invoke fuelInit for %s", o );
-		} catch ( SecurityException e ) {
-			FLog.e( e, "Cannot invoke fuelInit -- security exception for %s", o );
-		} catch ( NoSuchMethodException e ) {
-			// Squelch
-		} catch ( IllegalArgumentException e ) {
-			FLog.e( e, "Cannot invoke fuelInit -- illegal argument for %s", o );
-		} catch ( IllegalAccessException e ) {
-			FLog.e( e, "Cannot invoke fuelInit -- illegal access for %s", o );
-		}
-		return o;
 	}
 
 	// TODO: cache chains ? maybe cache already excludes non @FuelMethods to improve doAnnotLazyInject ?

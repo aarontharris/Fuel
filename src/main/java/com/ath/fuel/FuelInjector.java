@@ -12,10 +12,13 @@ import android.support.annotation.MainThread;
 import android.support.annotation.Nullable;
 import android.view.View;
 
+import com.ath.fuel.err.FuelInjectionException;
+import com.ath.fuel.err.FuelScopeViolationException;
+import com.ath.fuel.err.FuelUnableToObtainContextException;
+
 import java.lang.annotation.Annotation;
 import java.lang.ref.WeakReference;
 import java.lang.reflect.Method;
-import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.Comparator;
@@ -28,9 +31,6 @@ import java.util.Map.Entry;
 import java.util.Queue;
 import java.util.Set;
 import java.util.WeakHashMap;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ConcurrentMap;
-import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 
@@ -46,11 +46,11 @@ public final class FuelInjector {
 
 	private static boolean isDebug = false;
 	private static ReentrantReadWriteLock cacheLock = new ReentrantReadWriteLock();
+	private static final WeakHashMap<Object, Lazy> lazyCache = new WeakHashMap<>(); // parent -> LazyParent
+	private static WeakHashMap<Lazy, Queue<Lazy>> preprocessQueue = new WeakHashMap<>(); // LazyParent -> Queue<LazyChildren>
+	private static WeakHashMap<Lazy, WeakReference<Lazy>> weakLazyParentCache = new WeakHashMap<>(); // LazyParent -> WeakLazyParent
 
-	private static WeakHashMap<Object, WeakReference<Context>> objectToContext = new WeakHashMap<Object, WeakReference<Context>>();
-
-	private static WeakHashMap<Object, Queue<Lazy>> preprocessQueue = new WeakHashMap<Object, Queue<Lazy>>();
-	private static Queue<Lazy> EMPTY_QUEUE = new LinkedList<Lazy>();
+	// private static WeakHashMap<Object, WeakReference<Context>> objectToContext = new WeakHashMap<>();
 
 	/**
 	 * True will tighten up tolerances for quicker failures and more verbosity
@@ -155,84 +155,72 @@ public final class FuelInjector {
 		return isAppSingleton( leafType ) || isActivitySingleton( leafType );
 	}
 
-	static Context findContext( Object instance ) {
-		synchronized ( objectToContext ) {
-			if ( instance == null ) {
-				return null;
-			}
-			WeakReference<Context> ref = objectToContext.get( instance );
-			if ( ref != null ) {
-				return ref.get();
-			}
-			return null;
-		}
+//	static Context findContext( Object instance ) {
+//		synchronized ( objectToContext ) {
+//			if ( instance == null ) {
+//				return null;
+//			}
+//			WeakReference<Context> ref = objectToContext.get( instance );
+//			if ( ref != null ) {
+//				return ref.get();
+//			}
+//			return null;
+//		}
+//	}
+//
+//	static void rememberContext( Object instance, Context context ) {
+//		synchronized ( objectToContext ) {
+//			if ( findContext( instance ) == null ) {
+//				objectToContext.put( instance, new WeakReference<Context>( context ) );
+//			}
+//		}
+//	}
+
+	static Lazy findLazyByInstance( Object instance ) {
+		return lazyCache.get( instance );
 	}
 
-	static void rememberContext( Object instance, Context context ) {
-		synchronized ( objectToContext ) {
-			if ( findContext( instance ) == null ) {
-				objectToContext.put( instance, new WeakReference<Context>( context ) );
-			}
-		}
+	static void rememberLazyByInstance( Object instance, Lazy lazy ) {
+		lazyCache.put( instance, lazy );
 	}
 
-	private static void checkObjectCacheSize() {
-		try {
-			int size = objectToContext.keySet().size();
-			if ( ( size >= 500 ) && ( ( size % 100 ) == 0 ) ) {
-				FLog.w( "FUEL: FindLazy: Size: %s", size );
-				Set<Object> objs = objectToContext.keySet();
-				final ConcurrentMap<String, AtomicInteger> classCountMap = new ConcurrentHashMap<String, AtomicInteger>();
-				for ( Object o : objs ) {
-					String name = o.getClass().getSimpleName();
-					classCountMap.putIfAbsent( name, new AtomicInteger() );
-					classCountMap.get( name ).incrementAndGet();
-				}
-				List<String> classNameList = new ArrayList<String>( classCountMap.keySet() );
-				Collections.sort( classNameList, new Comparator<String>() {
-					@Override
-					public int compare( String lhs, String rhs ) {
-						int lhsCount = classCountMap.get( lhs ).get();
-						int rhsCount = classCountMap.get( rhs ).get();
-						return rhsCount - lhsCount;
-					}
-				} );
-				int totalSingleObjectInstances = 0;
-				for ( String name : classNameList ) {
-					if ( classCountMap.get( name ).get() == 1 ) {
-						totalSingleObjectInstances++;
-					} else {
-						FLog.w( "-- FUEL: FindLazy: name=%-40s count=%s", name, classCountMap.get( name ) );
-					}
-				}
-				FLog.w( "-- FUEL: FindLazy: %-45s count=%s", "Objects with one reference", totalSingleObjectInstances );
-			}
-		} catch ( Exception e ) {
-			FLog.e( e );
-		}
-	}
 
-	private static Queue<Lazy> getPreprocessQueue( Object parent, boolean readonly ) {
-		synchronized ( parent ) {
-			Queue<Lazy> queue = preprocessQueue.get( parent );
-			if ( queue == null && !readonly ) {
-				queue = new LinkedList<Lazy>();
-				preprocessQueue.put( parent, queue );
-				return queue;
-			}
-			if ( queue != null ) {
-				return queue;
-			}
-			return EMPTY_QUEUE; // FIXME: DANGEROUS -- see line 164
-		}
-	}
+//	private static void checkObjectCacheSize() {
+//		try {
+//			int size = objectToContext.keySet().size();
+//			if ( ( size >= 500 ) && ( ( size % 100 ) == 0 ) ) {
+//				FLog.w( "FUEL: FindLazy: Size: %s", size );
+//				Set<Object> objs = objectToContext.keySet();
+//				final ConcurrentMap<String, AtomicInteger> classCountMap = new ConcurrentHashMap<String, AtomicInteger>();
+//				for ( Object o : objs ) {
+//					String name = o.getClass().getSimpleName();
+//					classCountMap.putIfAbsent( name, new AtomicInteger() );
+//					classCountMap.get( name ).incrementAndGet();
+//				}
+//				List<String> classNameList = new ArrayList<String>( classCountMap.keySet() );
+//				Collections.sort( classNameList, new Comparator<String>() {
+//					@Override
+//					public int compare( String lhs, String rhs ) {
+//						int lhsCount = classCountMap.get( lhs ).get();
+//						int rhsCount = classCountMap.get( rhs ).get();
+//						return rhsCount - lhsCount;
+//					}
+//				} );
+//				int totalSingleObjectInstances = 0;
+//				for ( String name : classNameList ) {
+//					if ( classCountMap.get( name ).get() == 1 ) {
+//						totalSingleObjectInstances++;
+//					} else {
+//						FLog.w( "-- FUEL: FindLazy: name=%-40s count=%s", name, classCountMap.get( name ) );
+//					}
+//				}
+//				FLog.w( "-- FUEL: FindLazy: %-45s count=%s", "Objects with one reference", totalSingleObjectInstances );
+//			}
+//		} catch ( Exception e ) {
+//			FLog.e( e );
+//		}
+//	}
 
-	static void enqueueLazy( Object parent, Lazy lazy ) {
-		synchronized ( parent ) {
-			Queue<Lazy> queue = getPreprocessQueue( parent, false );
-			queue.add( lazy );
-		}
-	}
 
 	// static void enqueuePreToPostProcessingMerge( Lazy lazy, Object parent ) {
 	// synchronized ( lazy.type ) {
@@ -246,6 +234,15 @@ public final class FuelInjector {
 	private WeakHashMap<Object, List<Exception>> igniteCount;
 
 
+	static WeakReference<Lazy> attainWeakLazy( Lazy lazy ) {
+		WeakReference<Lazy> out = weakLazyParentCache.get( lazy );
+		if ( out == null ) {
+			out = new WeakReference<Lazy>( lazy );
+			weakLazyParentCache.put( lazy, out );
+		}
+		return out;
+	}
+
 	/**
 	 * Associates a context to the given instance so that its injections may find it in the dependency hierarchy.<br>
 	 * Also dequeues any injections that were queued up due to a context not being known at the time of Lazy.attain.<br>
@@ -254,7 +251,7 @@ public final class FuelInjector {
 	 * You may skip {@link #ignite(Context, Object)} when a the object has is mapped to a context via {@link FuelModule#provideContext(Object)}<br>
 	 * One exception to this rule is that injections are always queued up until Fuel has been initialized.<br>
 	 */
-	public static void ignite( Context context, Object instance ) {
+	public static void ignite( Context context, Object instance ) throws FuelUnableToObtainContextException, FuelScopeViolationException {
 		if ( instance == null ) {
 			return;
 		}
@@ -272,24 +269,61 @@ public final class FuelInjector {
 
 		// In the case of a service, we need to plug it into the cache after it calls ignite because we cant construct it
 		if ( instance instanceof Service ) {
-			// FLog.d( "SERVICE: ignite Service: %s with %s", instance.getClass().getSimpleName(), instance );
 			CacheKey key = CacheKey.attain( instance.getClass() );
 			injector.putObjectByContextType( context, key, instance );
 		}
 
 		// whatever this is we're igniting, it wasn't injected so lets artificially create a lazy for it
 		// so that its children can find their parent
-		rememberContext( instance, context );
+		//rememberContext( instance, context );
+		Lazy parent = findLazyByInstance( instance );
+		if ( parent == null ) {
+			parent = Lazy.newEmptyParent( instance );
+			rememberLazyByInstance( instance, parent );
+		}
 
-		dequeuePreProcesses( context, instance );
+		if ( !parent.isInitialized() ) {
+			doPreProcessParent( parent, context );
+		}
+
+		// Now that this instance has been ignited, it is okay to dequeue its queued up injections
+		dequeuePreProcesses( parent );
+
+		if ( instance instanceof OnFueled ) {
+			try {
+				( (OnFueled) instance ).onFueled();
+			} catch ( Exception e ) {
+				FLog.e( e );
+			}
+		}
 	}
 
-	static void dequeuePreProcesses( Context context, Object parent ) {
+	private static Collection<Lazy> getPreprocessQueue( final Lazy parent, boolean readonly ) {
 		synchronized ( parent ) {
-			Queue<Lazy> queue = getPreprocessQueue( parent, true );
+			Queue<Lazy> queue = preprocessQueue.get( parent );
+			if ( queue != null ) {
+				return queue;
+			} else if ( !readonly ) {
+				queue = new LinkedList<Lazy>();
+				preprocessQueue.put( parent, queue );
+				return queue;
+			}
+			return Collections.emptyList();
+		}
+	}
+
+	static void enqueueLazy( Lazy parent, Lazy lazy ) {
+		synchronized ( parent ) {
+			Collection<Lazy> queue = getPreprocessQueue( parent, false );
+			queue.add( lazy );
+		}
+	}
+
+	static void dequeuePreProcesses( final Lazy parent ) throws FuelUnableToObtainContextException, FuelScopeViolationException {
+		synchronized ( parent ) {
+			Collection<Lazy> queue = getPreprocessQueue( parent, true );
 			for ( Lazy lazy : queue ) {
-				// FLog.d( "DEQUEUE: %s w/ %s", lazy.type.getSimpleName(), context == null ? null : context.getClass().getSimpleName() );
-				doPreProcess( lazy, context );
+				doPreProcess( lazy, parent );
 			}
 			queue.clear();
 		}
@@ -318,44 +352,85 @@ public final class FuelInjector {
 		}
 	}
 
+	static void doPreProcessParent( Lazy parent, Context context ) {
+		parent.setContext( context, false );
+		parent.scope = determineScope( parent.leafType );
+		Scope contextScope = determineScope( context.getClass() );
+		validateScope( contextScope, parent.scope );
+		parent.setLeafType( FuelInjector.toLeafType( parent.type, parent.getFlavor() ) );
+		parent.parentNode = null;
+	}
+
 	/**
-	 * Process lazy prior to lazy's knowledge of it's instance
+	 * Process child prior to child-lazy's knowledge of it's instance
+	 * We initialize the child-lazy now that we know the context.
+	 * We call this PreProcess because its before the parent has called child-lazy.get()
+	 * though don't be confused, this is AFTER the lazy has been de-queued.
 	 */
-	static void doPreProcess( Lazy lazy, final Context context ) {
-		if ( lazy.isDebug() ) {
-			FLog.leaveBreadCrumb( "doPreProcess for %s, context is %s", lazy, context == null ? "null" : context.getClass().getSimpleName() );
+	static void doPreProcess( Lazy child, Lazy parent ) throws FuelUnableToObtainContextException, FuelScopeViolationException {
+		Context context = parent.getContext();
+		if ( child.isDebug() ) {
+			FLog.leaveBreadCrumb( "doPreProcess for %s, context is %s", child, context == null ? "null" : context.getClass().getSimpleName() );
 		}
 
 		Context lazyContext = context;
 
-		lazy.setLeafType( FuelInjector.toLeafType( lazy.type, lazy.getFlavor() ) );
+		child.scope = determineScope( child.leafType );
+		validateScope( parent.scope, child.scope );
+		child.parentNode = attainWeakLazy( parent );
 
-		if ( isAppSingleton( lazy.leafType ) ) {
+		child.setLeafType( FuelInjector.toLeafType( child.type, child.getFlavor() ) );
+
+
+		if ( isAppSingleton( child.leafType ) ) {
 			lazyContext = getApp();
-			if ( lazy.isDebug() ) {
-				FLog.leaveBreadCrumb( "doPreProcess for app singleton %s, so context is %s", lazy,
+			if ( child.isDebug() ) {
+				FLog.leaveBreadCrumb( "doPreProcess for app singleton %s, so context is %s", child,
 						context == null ? "null" : context.getClass().getSimpleName() );
 			}
 		}
 
-		lazy.setContext( lazyContext, false );
+		child.setContext( lazyContext, false );
 
-		if ( lazy.isDebug() ) {
-			FLog.leaveBreadCrumb( "doPreProcess for %s, context ended up with %s", lazy,
+		if ( child.isDebug() ) {
+			FLog.leaveBreadCrumb( "doPreProcess for %s, context ended up with %s", child,
 					context == null ? "null" : context.getClass().getSimpleName() );
 		}
 
-		if ( Service.class.isAssignableFrom( lazy.leafType ) ) {
-			doServicePreProcess( lazy, lazyContext );
+		if ( Service.class.isAssignableFrom( child.leafType ) ) {
+			doServicePreProcess( child, lazyContext );
+		}
+	}
+
+	static Scope determineScope( Class leafType ) {
+		if ( leafType != null ) {
+			if ( isAppSingleton( leafType ) ) {
+				return Scope.Application;
+			} else if ( Application.class.isAssignableFrom( leafType ) ) {
+				return Scope.Application;
+			} else if ( isActivitySingleton( leafType ) ) {
+				return Scope.Activity;
+			} else if ( Activity.class.isAssignableFrom( leafType ) ) {
+				return Scope.Activity;
+			} else if ( Context.class.isAssignableFrom( leafType ) ) {
+				return Scope.Application;
+			}
+		}
+		return Scope.Undef;
+	}
+
+	static void validateScope( Scope parent, Scope child ) throws FuelScopeViolationException {
+		if ( parent == null || child == null || !parent.canAccess( child ) ) {
+			throw new FuelScopeViolationException( "Fuel Scope Violation: %s cannot access %s", parent, child );
 		}
 	}
 
 	/**
 	 * after we have an instance
 	 */
-	static void doPostProcess( Lazy lazy, Context context ) {
-		rememberContext( lazy.instance, context );
-		dequeuePreProcesses( context, lazy.instance );
+	static void doPostProcess( Lazy lazy ) throws FuelUnableToObtainContextException, FuelScopeViolationException {
+		rememberLazyByInstance( lazy.getInstance(), lazy );
+		dequeuePreProcesses( lazy );
 	}
 
 	/**
@@ -367,7 +442,7 @@ public final class FuelInjector {
 	 * Best to call from App.onCreate()
 	 */
 	@MainThread
-	public static final void initializeModule( FuelModule fuelModule ) {
+	public static final void initializeModule( FuelModule fuelModule ) throws FuelUnableToObtainContextException, FuelScopeViolationException {
 		if ( FuelInjector.app != null ) {
 			FLog.w( "initializeModules called again -- be careful!" );
 
@@ -385,11 +460,9 @@ public final class FuelInjector {
 		fuelModule.setActivityCallbacks( new ActivityLifecycleCallbacks() {
 			@Override
 			public void onActivityCreated( Activity activity, Bundle savedInstanceState ) {
-				//FLog.e( new Exception() );
-				FuelInjector.activity = activity;
-				ignite( activity, activity );
 				try {
-					injector.fuelModule.doAnnotationProcessing( activity ); // calls fuelInit methods :/
+					FuelInjector.activity = activity;
+					ignite( activity, activity );
 				} catch ( Exception e ) {
 					FLog.e( e );
 				}
@@ -657,13 +730,25 @@ public final class FuelInjector {
 			}
 			return obj;
 		} catch ( FuelInjectionException e ) {
-			throw e;
+			throw FuelInjector.doFailure( lazy, e );
 		} catch ( Exception e ) {
 			if ( lazy.isDebug() ) {
 				FLog.leaveBreadCrumb( "attainInstance Exception: %s", e.getMessage() );
 			}
-			throw new FuelInjectionException( e );
+			throw FuelInjector.doFailure( lazy, e );
 		}
+	}
+
+	static FuelInjectionException doFailure( Lazy lazy, Exception exception ) {
+		return doFailure( lazy, new FuelInjectionException( exception ) );
+	}
+
+	static FuelInjectionException doFailure( Lazy lazy, FuelInjectionException exception ) {
+		if ( isInitialized() ) {
+			getFuelModule().onFailure( lazy, exception );
+			return exception;
+		}
+		throw exception;
 	}
 
 	/**
@@ -792,19 +877,6 @@ public final class FuelInjector {
 			contextCache.put( key, value );
 		} finally {
 			lock.unlock();
-		}
-	}
-
-	static void handleLazyGetFailed( FuelInjectionException e ) {
-		if ( injector.fuelModule != null ) {
-			FuelModule.OnLazyGetFailed listener = injector.fuelModule.getOnLazyGetFailedListener();
-			if ( listener != null ) {
-				listener.onFail( e );
-			} else {
-				FLog.e( e );
-			}
-		} else {
-			FLog.e( e );
 		}
 	}
 

@@ -1,9 +1,11 @@
 package com.ath.fuel;
 
-import android.app.Activity;
-import android.app.Application;
 import android.content.Context;
+import android.support.annotation.NonNull;
 import android.view.View;
+
+import com.ath.fuel.err.FuelInjectionException;
+import com.ath.fuel.err.FuelUnableToObtainContextException;
 
 import java.lang.ref.WeakReference;
 
@@ -182,11 +184,9 @@ public class Lazy<T> {
 		return lazy;
 	}
 
-	static final Lazy newLazy( Context context, Object instance ) {
-		Lazy lazy = new Lazy( instance.getClass() );
-		lazy.setLeafType( instance.getClass() );
-		lazy.setContext( context, false );
-		lazy.setInstance( instance );
+	static final Lazy newEmptyParent( Object parent ) {
+		Lazy lazy = new Lazy( parent.getClass() );
+		lazy.setInstance( parent );
 		return lazy;
 	}
 
@@ -200,89 +200,42 @@ public class Lazy<T> {
 	}
 
 	private static final <TYPE> void initializeNewlyAttainedLazy( Lazy<TYPE> lazy, Object parent ) {
-		lazy.parentRef = new WeakReference<Object>( parent );
-		if ( FuelInjector.getFuelModule() != null ) { // obtain the leafType now if the module is available (almost always)
-			lazy.setLeafType( FuelInjector.toLeafType( lazy.type, lazy.flavor ) );
-		}
-
-		if ( lazy.isDebug() ) {
-			FLog.leaveBreadCrumb( "initializeNewlyAttainedLazy called on %s with parent: %s", lazy,
-					parent == null ? "null" : parent.getClass().getSimpleName() );
-		}
-
 		Context context = null;
+		Lazy lazyParent = null;
 
-		// One-off in case we're asking for an Application
-		if ( context == null ) {
-			if ( Application.class.isAssignableFrom( lazy.type ) ) {
-				context = FuelInjector.getApp();
-				if ( lazy.isDebug() ) {
-					FLog.leaveBreadCrumb( "initializeNewlyAttainedLazy: %s is application, set context to app: %s", lazy, context );
+		try {
+			if ( FuelInjector.isInitialized() ) {
+				// Hopefully this parent has been ignited already and we'll have a Lazy to show for it
+				lazyParent = FuelInjector.findLazyByInstance( parent );
+				if ( lazyParent != null && lazyParent.contextRef != null ) {
+					context = (Context) lazyParent.contextRef.get(); // not sure why this cast is necessary? AndroidStudio fail?
+
+					// Do pre-preocess because we know the parent-lazy and do not need to enqueue
+					FuelInjector.doPreProcess( lazy, lazyParent );
 				}
 			}
+		} catch ( FuelInjectionException e ) {
+			// Failed to work out the parent, lets just enqueue it
+			lazy.contextRef = null; // reset
 		}
 
-		// Maybe we can determine if it's an app singleton from the leafType or type
+		if ( lazyParent == null ) {
+			lazyParent = newEmptyParent( parent );
+			FuelInjector.rememberLazyByInstance( parent, lazyParent );
+		}
+
 		if ( context == null ) {
-			Class<?> bestType = lazy.leafType == null ? lazy.type : lazy.leafType;
-			if ( FuelInjector.getFuelModule() != null ) {
-				context = FuelInjector.getFuelModule().provideContext( bestType );
-				if ( context != null && lazy.isDebug() ) {
-					FLog.leaveBreadCrumb( "initializeNewlyAttainedLazy: %s got context %s from provideContextSafe(bestType)", lazy, context
-							.getClass().getSimpleName() );
-				}
-			}
-		}
-
-		// Can this parent provide its own context?
-		if ( context == null ) {
-			if ( FuelInjector.getFuelModule() != null ) {
-				context = FuelInjector.getFuelModule().provideContext( parent );
-				if ( context != null && lazy.isDebug() ) {
-					FLog.leaveBreadCrumb( "initializeNewlyAttainedLazy: %s got context %s from provideContextSafe", lazy, context
-							.getClass().getSimpleName() );
-				}
-			}
-		}
-
-		// Can we find the context somewhere up the dependency hierarchy ?
-		if ( context == null ) {
-			context = FuelInjector.findContext( parent ); // will find a lazy if the parent was injected
-			if ( context != null && lazy.isDebug() ) {
-				FLog.leaveBreadCrumb( "initializeNewlyAttainedLazy: %s got context %s from parent findLazy", lazy,
-						context.getClass().getSimpleName() );
-			}
-		}
-
-		// How'd we do?
-		if ( context == null || FuelInjector.isUninitialized() ) { // we guessed but nothing was avail, queue up
-			FuelInjector.enqueueLazy( parent, lazy ); // FIXME: FUEL -- queued up stuff should go get GC'd when the activity goes away?
-			if ( lazy.isDebug() ) {
-				FLog.leaveBreadCrumb( "initializeNewlyAttainedLazy: enqueued to associate context later: %s", lazy );
-			}
-			// If context is found to be null:
-			// if debug build just crash and yell, but if prod use it and yell
-			if ( context == null ) {
-				Activity guessedActivity = FuelInjector.getActivity();
-				if ( guessedActivity != null ) {
-					lazy.setContext( guessedActivity, true );
-					if ( lazy.isDebug() ) {
-						FLog.leaveBreadCrumb( "initializeNewlyAttainedLazy: guessed activity: %s for %s", guessedActivity.getClass().getSimpleName(),
-								lazy );
-					}
-				}
-			}
-		} else {
-			if ( lazy.isDebug() ) {
-				FLog.leaveBreadCrumb( "initializeNewlyAttainedLazy: had context: %s for %s", context.getClass().getSimpleName(), lazy );
-			}
-
-			FuelInjector.doPreProcess( lazy, context );
+			// queue up this lazy until the parent is ignited
+			FuelInjector.enqueueLazy( lazyParent, lazy );
 		}
 	}
 
-	Class<T> type;
-	Class<?> leafType; // used only to indicate if the type was found to have mapping
+	WeakReference<Lazy> parentNode;
+	Scope scope;
+
+
+	Class<T> type; // the type requested, but not necessarily the type to be instantiated
+	Class<?> leafType; // the type to be instantiated, not necessarily the type requested but some derivitive.
 	boolean isActivitySingleton = false;
 	boolean typeIsContext = false;
 	boolean useWeakInstance = false;
@@ -355,28 +308,40 @@ public class Lazy<T> {
 		}
 	}
 
-	// kinda hairy but it's trying to be intelligent
-	// considering we can potentially lose a weak reference, this code tries to re-attain the context if lost
-	// but only if it's safe. it is considered safe only when the found context's hashcode matches this lazy's original context's hashcode.
-	public final Context getContext() {
+	boolean isInitialized() {
+		return hasContext() && leafType != null;
+	}
+
+	boolean hasContext() {
+		return contextRef != null;
+	}
+
+	public final Context getContext() throws FuelUnableToObtainContextException {
 		Context context = null;
-		if ( contextRef != null ) {
+		if ( hasContext() ) {
 			context = contextRef.get();
 		}
 		if ( context == null ) {
-			// first try an activity context for a match
-			Context tmp = FuelInjector.getActivity();
-			if ( tmp != null && contextHashCode == tmp.hashCode() ) { // TODO: why do we do this?
-				context = tmp;
-				setContext( context, false );
+			if ( !isInitialized() ) {
+				throw FuelInjector.doFailure( this, new FuelUnableToObtainContextException( "Never Ignited " + this ) );
 			}
-			// secondly if unsuccessfully with the activity context matchup and this is not a ActivitySingleton, try app
-			if ( context == null && leafType != null && !isActivitySingleton ) { // we consider leafType because isActivitySingleton isnt known until
-				// leafType is known
-				tmp = FuelInjector.getApp();
-				if ( tmp != null && contextHashCode == tmp.hashCode() ) { // TODO: why do we do this?
-					context = tmp;
-					setContext( context, false );
+
+			if ( FuelInjector.isAppSingleton( leafType ) ) {
+				context = FuelInjector.getApp();
+				setContext( context, true );
+			} else if ( FuelInjector.isActivitySingleton( leafType ) ) {
+				context = FuelInjector.getActivity();
+				setContext( context, true );
+			}
+
+			// Cannot obtain a context, obviously there was some misuse of Fuel that creeped through
+			// This is going to be a critical fail, so lets notify the FuelModule of critical fail
+			if ( context == null ) {
+				FuelUnableToObtainContextException err = new FuelUnableToObtainContextException( "Unable to obtain context for " + this );
+				FuelInjector.doFailure( this, err );
+				context = err.consumeContext();
+				if ( context == null ) {
+					throw err;
 				}
 			}
 		}
@@ -401,16 +366,6 @@ public class Lazy<T> {
 
 	protected T getInstance() {
 
-		// Asking for some kind of context -- lets see if we can find what they want from the context we already know
-		if ( typeIsContext ) {
-			// Try Application First -- this is what you get if you ask for Context, Application, CSApplicationBase, Sportacular
-			if ( FuelInjector.getApp() != null && type.isAssignableFrom( FuelInjector.getApp().getClass() ) ) {
-				return (T) FuelInjector.getApp();
-			}
-
-			// FIXME: support finding an activity quickly
-		}
-
 		// We determined that it was unsuitable to keep a strong ref to the instance so lets refer to the instanceRef instead of instance
 		if ( useWeakInstance ) {
 			T weakInst = null;
@@ -427,7 +382,7 @@ public class Lazy<T> {
 	 * Not a noob feature -- use this only to late-ignite a lazy with the given context<br>
 	 * Useful when you need a one-off {@link Lazy#attain(Context, Class, Integer)} and the context is provided late or in an odd manner
 	 */
-	public T get( Context context ) {
+	public T get( Context context ) throws FuelInjectionException {
 		if ( getContext() == null && parentRef != null ) {
 			Object parent = parentRef.get();
 			if ( parent != null ) {
@@ -443,25 +398,10 @@ public class Lazy<T> {
 	 * Get the instance associated with this type.<br>
 	 * May return null and will never throw an exception, however the FuelModule.OnLazyGetFailed will be called.
 	 */
-	public T get() {
-		try {
-			T out = getChecked();
-			// if a context singleton is being injected from a non-activity context
-			if ( ( !( getContext() instanceof Activity ) ) && FuelInjector.isActivitySingleton( leafType ) ) {
-				if ( FuelInjector.isDebug() ) {
-					// As Arnie says: BLOW "STUFF" UP
-					String contextName = getContext().getClass().getSimpleName();
-					String singletonName = leafType.getSimpleName();
-					throw new Error(
-							"FAIL: you tried to inject a ActivitySingleton(" + singletonName + ") form within a non-Activity context(" + contextName
-									+ ")" );
-				}
-			}
-			return out;
-		} catch ( FuelInjectionException e ) {
-			FuelInjector.handleLazyGetFailed( e );
-		}
-		return null;
+	@NonNull public T get() throws FuelInjectionException {
+		FLog.d("get() %s", this );
+		T out = getChecked();
+		return out;
 	}
 
 
@@ -517,7 +457,7 @@ public class Lazy<T> {
 			if ( debug ) {
 				FLog.leaveBreadCrumb( "getChecked Exception %s", e.getMessage() );
 			}
-			throw new FuelInjectionException( e );
+			throw FuelInjector.doFailure( this, e );
 		}
 		return getInstance();
 	}
@@ -541,11 +481,29 @@ public class Lazy<T> {
 				instanceStr = String.format( "%s[%x]", getInstance().getClass().getSimpleName(), getInstance().hashCode() );
 			}
 
-			return String.format( "Lazy[type='%s', leafType='%s', flavor='%s', instance='%s'",
+//			Lazy ptr = null;
+//			int i = 0;
+//			do {
+//				ptr = parentNode == null ? null : parentNode.get();
+//				FLog.d("[%s] %s", ptr);
+//			} while ( ptr != null );
+
+			String contextStr = "null";
+			if ( contextRef != null ) {
+				Context context = contextRef.get();
+				if ( context != null ) {
+					contextStr = context.getClass().getSimpleName();
+				}
+			}
+
+
+			return String.format( "Lazy[type='%s', leafType='%s', flavor='%s', instance='%s', parent='%s', context='%s'",
 					( type == null ? null : type.getSimpleName() ),
 					( leafType == null ? null : leafType.getSimpleName() ),
 					flavor,
-					instanceStr
+					instanceStr,
+					parentNode == null ? null : ( parentNode.get() == null ? null : parentNode.get().type.getSimpleName() ),
+					contextStr
 			);
 		} catch ( Exception e ) {
 			FLog.e( e );
