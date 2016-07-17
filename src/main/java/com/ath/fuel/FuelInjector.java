@@ -127,13 +127,6 @@ public final class FuelInjector {
 	}
 
 	/**
-	 * @return true if this class is truly a Context
-	 */
-	static boolean isContext( Class<?> clazz ) {
-		return Context.class.isAssignableFrom( clazz );
-	}
-
-	/**
 	 * @see #isInitialized()
 	 */
 	public static boolean isUninitialized() {
@@ -152,8 +145,12 @@ public final class FuelInjector {
 		return leafType.isAnnotationPresent( ActivitySingleton.class );
 	}
 
+	static boolean isFragmentSingleton( Class<?> leafType ) {
+		return leafType.isAnnotationPresent( FragmentSingleton.class );
+	}
+
 	static boolean isSingleton( Class<?> leafType ) {
-		return isAppSingleton( leafType ) || isActivitySingleton( leafType );
+		return isAppSingleton( leafType ) || isActivitySingleton( leafType ) || isFragmentSingleton( leafType );
 	}
 
 
@@ -302,7 +299,7 @@ public final class FuelInjector {
 		// in the special case of a service, we need to spawn it now so that its ready when we call get
 		// FLog.d( "SERVICE: doServicePreProcess Service: %s", lazy.leafType.getSimpleName() );
 
-		if ( Service.class.isAssignableFrom( lazy.leafType ) ) {
+		if ( isService( lazy.leafType ) ) {
 			CacheKey key = CacheKey.attain( lazy.leafType );
 			// FLog.d( "SERVICE: doServicePreProcess get Service: %s", lazy.leafType.getSimpleName() );
 			Object service = getServiceInstance( context, key, false );
@@ -359,7 +356,7 @@ public final class FuelInjector {
 					context == null ? "null" : context.getClass().getSimpleName() );
 		}
 
-		if ( Service.class.isAssignableFrom( child.leafType ) ) {
+		if ( isService( child.leafType ) ) {
 			doServicePreProcess( child, lazyContext );
 		}
 
@@ -370,15 +367,18 @@ public final class FuelInjector {
 
 	static Scope determineScope( Class leafType ) {
 		if ( leafType != null ) {
-			if ( isAppSingleton( leafType ) ) {
-				return Scope.Application;
-			} else if ( Application.class.isAssignableFrom( leafType ) ) {
-				return Scope.Application;
+			// ordered by precedence
+			if ( isFragmentSingleton( leafType ) ) {
+				return Scope.Fragment;
 			} else if ( isActivitySingleton( leafType ) ) {
 				return Scope.Activity;
-			} else if ( Activity.class.isAssignableFrom( leafType ) ) {
+			} else if ( isActivity( leafType ) ) {
 				return Scope.Activity;
-			} else if ( Context.class.isAssignableFrom( leafType ) ) {
+			} else if ( isAppSingleton( leafType ) ) {
+				return Scope.Application;
+			} else if ( isApplication( leafType ) ) {
+				return Scope.Application;
+			} else if ( isContext( leafType ) ) {
 				return Scope.Application;
 			}
 		}
@@ -524,6 +524,31 @@ public final class FuelInjector {
 		return getInstance( context, CacheKey.attain( type, flavor ), false );
 	}
 
+	static boolean isApplication( Class<?> leafType ) {
+		return Application.class.isAssignableFrom( leafType );
+	}
+
+	static boolean isActivity( Class<?> leafType ) {
+		return Activity.class.isAssignableFrom( leafType );
+	}
+
+	static boolean isFragment( Class<?> leafType ) {
+		if ( android.app.Fragment.class.isAssignableFrom( leafType ) ) {
+			return true;
+		} else if ( android.support.v4.app.Fragment.class.isAssignableFrom( leafType ) ) {
+			return true;
+		}
+		return false;
+	}
+
+	static boolean isService( Class<?> leafType ) {
+		return Service.class.isAssignableFrom( leafType );
+	}
+
+	static boolean isContext( Class<?> leafType ) {
+		return Context.class.isAssignableFrom( leafType );
+	}
+
 	static final <T> T getInstance( Context context, CacheKey key, boolean debug ) {
 		// if ( Application.class.isAssignableFrom( key.getLeafType() ) ) {
 		// return (T) getApp();
@@ -549,24 +574,24 @@ public final class FuelInjector {
 		// -- context = activity or app
 		// -- leaf = service
 
-		if ( Application.class.isAssignableFrom( key.getLeafType() ) ) {
+		if ( isApplication( key.getLeafType() ) ) {
 			if ( debug ) {
 				FLog.leaveBreadCrumb( "getInstance for App got %s", getApp() == null ? "null" : getApp().getClass().getSimpleName() );
 			}
 			return (T) getApp();
-		} else if ( Activity.class.isAssignableFrom( key.getLeafType() ) && context instanceof Activity ) {
+		} else if ( isActivity( key.getLeafType() ) && context instanceof Activity ) {
 			if ( debug ) {
 				FLog.leaveBreadCrumb( "getInstance for Activity got %s", context == null ? "null" : context.getClass().getSimpleName() );
 			}
 			return (T) context;
-		} else if ( Service.class.isAssignableFrom( key.getLeafType() ) ) {
+		} else if ( isService( key.getLeafType() ) ) {
 			final T serviceInstance = getServiceInstance( context, key, true );
 			if ( debug ) {
 				FLog.leaveBreadCrumb( "getInstance for Service got %s",
 						serviceInstance == null ? "null" : serviceInstance.getClass().getSimpleName() );
 			}
 			return serviceInstance;
-		} else if ( Context.class.isAssignableFrom( key.getLeafType() ) ) {
+		} else if ( isContext( key.getLeafType() ) ) {
 			if ( debug ) {
 				FLog.leaveBreadCrumb( "getInstance for Context got %s", context == null ? "null" : context.getClass().getSimpleName() );
 			}

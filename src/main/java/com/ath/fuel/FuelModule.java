@@ -254,9 +254,9 @@ public abstract class FuelModule {
 	@CallSuper
 	protected final Context provideContext( Class<?> type ) {
 		if ( type != null ) {
-			if ( Application.class.isAssignableFrom( type ) ) {
+			if ( FuelInjector.isApplication( type ) ) {
 				return FuelInjector.getApp(); // may be null if not initialized
-			} else if ( Service.class.isAssignableFrom( type ) ) {
+			} else if ( FuelInjector.isService( type ) ) {
 				return FuelInjector.getApp(); // may be null if not initialized
 			} else if ( FuelInjector.isAppSingleton( type ) ) {
 				return FuelInjector.getApp(); // may be null if not initialized
@@ -335,7 +335,7 @@ public abstract class FuelModule {
 
 	/**
 	 * Add a mapping rule for Class to Class.<br>
-	 * When you {@link Lazy#attain(Context, Class, Integer)}, the Class can be a base-interface and
+	 * When you {@link Lazy#attain(Object, Class, Integer)}, the Class can be a base-interface and
 	 * Fuel will search the Mapping Rules to decide the best instance.<br>
 	 * <br>
 	 * EX:<br>
