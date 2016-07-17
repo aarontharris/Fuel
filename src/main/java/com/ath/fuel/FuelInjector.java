@@ -155,23 +155,24 @@ public final class FuelInjector {
 		return isAppSingleton( leafType ) || isActivitySingleton( leafType );
 	}
 
-	static synchronized Context findContext( Object instance ) {
-		if ( instance == null ) {
+	static Context findContext( Object instance ) {
+		synchronized ( objectToContext ) {
+			if ( instance == null ) {
+				return null;
+			}
+			WeakReference<Context> ref = objectToContext.get( instance );
+			if ( ref != null ) {
+				return ref.get();
+			}
 			return null;
 		}
-		WeakReference<Context> ref = objectToContext.get( instance );
-		if ( ref != null ) {
-			return ref.get();
-		}
-		return null;
 	}
 
-	static synchronized void rememberContext( Object instance, Context context ) {
-		if ( findContext( instance ) == null ) {
-			objectToContext.put( instance, new WeakReference<Context>( context ) );
-			//if ( isDebug() ) {
-			//	checkObjectCacheSize();
-			//}
+	static void rememberContext( Object instance, Context context ) {
+		synchronized ( objectToContext ) {
+			if ( findContext( instance ) == null ) {
+				objectToContext.put( instance, new WeakReference<Context>( context ) );
+			}
 		}
 	}
 
