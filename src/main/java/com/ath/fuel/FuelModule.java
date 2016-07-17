@@ -186,8 +186,12 @@ public abstract class FuelModule {
 	 */
 	@CallSuper
 	protected void onObtainNewSingleton( Object instance ) {
-		if ( instance instanceof OnFueled ) {
-			( (OnFueled) instance ).onFueled();
+		try {
+			if ( instance instanceof OnFueled ) {
+				( (OnFueled) instance ).onFueled();
+			}
+		} catch ( Exception e ) {
+			FLog.e( e );
 		}
 	}
 
@@ -457,8 +461,7 @@ public abstract class FuelModule {
 				return initializeNewInstance( lazy );
 			}
 
-			if ( otherInjectables.contains( leafType ) || leafType.isAnnotationPresent( ActivitySingleton.class ) || leafType
-					.isAnnotationPresent( AppSingleton.class ) ) {
+			if ( FuelInjector.isSingleton( leafType ) ) {
 				lazy.instance = newInstance( lazy );
 				if ( lazy.isDebug() ) {
 					FLog.leaveBreadCrumb( "obtainInstance other/ActivitySingleton/AppSingleton new instance returned instance for lazy - %s", lazy );

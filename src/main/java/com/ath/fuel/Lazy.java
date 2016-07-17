@@ -114,11 +114,19 @@ public class Lazy<T> {
 		}
 	}
 
+	// when ActivitySingleton in constructed
+	// we come here for it's injectable AppSingleton before ActivitySingleton has its lazy remembered
+	// So AppSingleton can't find its parent and ends up creating a new one
+	// so AppSingleton is queued up under a temp lazy that never gets processed
 	private static final <TYPE> void preInitializeNewLazy( Lazy<TYPE> lazy, Object parent ) {
 		Context context = null;
 		Lazy lazyParent = null;
 
 		try {
+			if ( lazy.type.getSimpleName().equals( "SampleAppSingleton" ) ) {
+				FLog.d("found it");
+			}
+
 			if ( FuelInjector.isInitialized() ) {
 				// Hopefully this parent has been ignited already and we'll have a Lazy to show for it
 				lazyParent = FuelInjector.findLazyByInstance( parent );

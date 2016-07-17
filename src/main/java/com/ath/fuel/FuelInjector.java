@@ -336,10 +336,12 @@ public final class FuelInjector {
 	static void dequeuePreProcesses( final Lazy parent ) throws FuelUnableToObtainContextException, FuelScopeViolationException {
 		synchronized ( parent ) {
 			Collection<Lazy> queue = getPreprocessQueue( parent, true );
-			for ( Lazy lazy : queue ) {
-				doPreProcess( lazy, parent );
+			if ( queue.size() > 0 ) {
+				for ( Lazy lazy : queue ) {
+					doPreProcess( lazy, parent );
+				}
+				queue.clear();
 			}
-			queue.clear();
 		}
 	}
 
@@ -389,10 +391,9 @@ public final class FuelInjector {
 
 		Context lazyContext = context;
 
+		child.setLeafType( FuelInjector.toLeafType( child.type, child.getFlavor() ) );
 		child.scope = determineScope( child.leafType );
 		validateScope( parent.scope, child.scope );
-
-		child.setLeafType( FuelInjector.toLeafType( child.type, child.getFlavor() ) );
 
 
 		if ( isAppSingleton( child.leafType ) ) {
@@ -413,6 +414,8 @@ public final class FuelInjector {
 		if ( Service.class.isAssignableFrom( child.leafType ) ) {
 			doServicePreProcess( child, lazyContext );
 		}
+
+		// ignite( context, child.instance );
 
 		child.preProcessed = true;
 	}
