@@ -580,6 +580,11 @@ public abstract class FuelModule {
 		throw new FuelInjectionException( "Unable to instantiate %s", lazy );
 	}
 
+	/**
+	 * @param lazy must have an instance
+	 * @return
+	 * @throws Exception
+	 */
 	Object initializeNewInstance( Lazy lazy ) throws Exception {
 		if ( lazy.isDebug() ) {
 			FLog.leaveBreadCrumb( "initializeNewInstance for %s", lazy );
