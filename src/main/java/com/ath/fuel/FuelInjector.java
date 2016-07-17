@@ -45,9 +45,9 @@ public final class FuelInjector {
 	// case
 
 	private static boolean isDebug = false;
-	private static ReentrantReadWriteLock cacheLock = new ReentrantReadWriteLock();
+	private static final ReentrantReadWriteLock cacheLock = new ReentrantReadWriteLock();
 	private static final WeakHashMap<Object, Lazy> lazyCache = new WeakHashMap<>(); // parent -> LazyParent
-	private static WeakHashMap<Object, Queue<Lazy>> preprocessQueue = new WeakHashMap<>(); // LazyParent -> Queue<LazyChildren>
+	private static final WeakHashMap<Object, Queue<Lazy>> preprocessQueue = new WeakHashMap<>(); // LazyParent -> Queue<LazyChildren>
 
 	// private static WeakHashMap<Object, WeakReference<Context>> objectToContext = new WeakHashMap<>();
 
