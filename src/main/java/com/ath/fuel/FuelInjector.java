@@ -251,50 +251,64 @@ public final class FuelInjector {
 	 * You may skip {@link #ignite(Context, Object)} when a the object has is mapped to a context via {@link FuelModule#provideContext(Object)}<br>
 	 * One exception to this rule is that injections are always queued up until Fuel has been initialized.<br>
 	 */
-	public static void ignite( Context context, Object instance ) throws FuelUnableToObtainContextException, FuelScopeViolationException {
-		if ( instance == null ) {
-			return;
-		}
-
-		// Bail out if in edit mode
-		if ( instance instanceof View ) {
-			if ( ( (View) instance ).isInEditMode() ) {
+	public static void ignite( Context context, Object instance ) {
+		try {
+			if ( instance == null ) {
 				return;
 			}
-		}
 
-		// skip wrappers
-		context = toContext( context );
-
-
-		// In the case of a service, we need to plug it into the cache after it calls ignite because we cant construct it
-		if ( instance instanceof Service ) {
-			CacheKey key = CacheKey.attain( instance.getClass() );
-			injector.putObjectByContextType( context, key, instance );
-		}
-
-		// whatever this is we're igniting, it wasn't injected so lets artificially create a lazy for it
-		// so that its children can find their parent
-		//rememberContext( instance, context );
-		Lazy parent = findLazyByInstance( instance );
-		if ( parent == null ) {
-			parent = Lazy.newEmptyParent( instance );
-			rememberLazyByInstance( instance, parent );
-		}
-
-		if ( !parent.isInitialized() ) {
-			doPreProcessParent( parent, context );
-		}
-
-		// Now that this instance has been ignited, it is okay to dequeue its queued up injections
-		dequeuePreProcesses( parent );
-
-		if ( instance instanceof OnFueled ) {
-			try {
-				( (OnFueled) instance ).onFueled();
-			} catch ( Exception e ) {
-				FLog.e( e );
+			// Bail out if in edit mode
+			if ( instance instanceof View ) {
+				if ( ( (View) instance ).isInEditMode() ) {
+					return;
+				}
 			}
+
+			// skip wrappers
+			context = toContext( context );
+
+
+			// In the case of a service, we need to plug it into the cache after it calls ignite because we cant construct it
+			if ( instance instanceof Service ) {
+				CacheKey key = CacheKey.attain( instance.getClass() );
+				injector.putObjectByContextType( context, key, instance );
+			}
+
+			// whatever this is we're igniting, it wasn't injected so lets artificially create a lazy for it
+			// so that its children can find their parent
+			//rememberContext( instance, context );
+			Lazy parent = findLazyByInstance( instance );
+			if ( parent == null ) {
+				parent = Lazy.newEmptyParent( instance );
+			}
+
+			if ( !Lazy.isPreProcessed( parent ) ) {
+				doPreProcessParent( parent, context );
+			}
+
+			if ( !Lazy.isPostProcessed( parent ) ) {
+				getFuelModule().initializeNewInstance( parent );
+			}
+
+			// Kind of a hack
+			// We only do it if its not a singleton because
+			// we already did it inside initializeNewInstance if it was a singleton
+			// thats because initializeNewInstance calls onObtainNewSingleton
+			// which calls onFueled -- so to not break the policy that says
+			// onObtainNewSingleton will only be called for Singletons
+			// we dupe the code here :/
+			if ( !FuelInjector.isSingleton( parent.leafType ) ) {
+				if ( instance instanceof OnFueled ) {
+					try {
+						( (OnFueled) instance ).onFueled();
+					} catch ( Exception e ) {
+						FLog.e( e );
+					}
+				}
+			}
+
+		} catch ( Exception e ) {
+			throw FuelInjector.doFailure( null, e );
 		}
 	}
 
@@ -353,11 +367,12 @@ public final class FuelInjector {
 	}
 
 	static void doPreProcessParent( Lazy parent, Context context ) {
+		parent.setLeafType( FuelInjector.toLeafType( parent.type, parent.getFlavor() ) );
 		parent.setContext( context, false );
 		parent.scope = determineScope( parent.leafType );
 		Scope contextScope = determineScope( context.getClass() );
 		validateScope( contextScope, parent.scope );
-		parent.setLeafType( FuelInjector.toLeafType( parent.type, parent.getFlavor() ) );
+		parent.preProcessed = true;
 	}
 
 	/**
@@ -398,6 +413,8 @@ public final class FuelInjector {
 		if ( Service.class.isAssignableFrom( child.leafType ) ) {
 			doServicePreProcess( child, lazyContext );
 		}
+
+		child.preProcessed = true;
 	}
 
 	static Scope determineScope( Class leafType ) {
@@ -429,6 +446,7 @@ public final class FuelInjector {
 	static void doPostProcess( Lazy lazy ) throws FuelUnableToObtainContextException, FuelScopeViolationException {
 		rememberLazyByInstance( lazy.getInstance(), lazy );
 		dequeuePreProcesses( lazy );
+		lazy.postProcessed = true;
 	}
 
 	/**

@@ -3,7 +3,7 @@ package com.ath.fuel;
 
 class CacheKey {
 
-    public static final Integer DEFAULT_FLAVOR = 0;
+    public static final Integer DEFAULT_FLAVOR = null;
 
     public static CacheKey attain( Class<?> leafType ) {
         return new CacheKey( leafType, DEFAULT_FLAVOR );

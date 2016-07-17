@@ -577,7 +577,7 @@ public abstract class FuelModule {
 		throw new FuelInjectionException( "Unable to instantiate %s", lazy );
 	}
 
-	private Object initializeNewInstance( Lazy lazy ) throws Exception {
+	Object initializeNewInstance( Lazy lazy ) throws Exception {
 		if ( lazy.isDebug() ) {
 			FLog.leaveBreadCrumb( "initializeNewInstance for %s", lazy );
 		}
@@ -604,8 +604,7 @@ public abstract class FuelModule {
 	}
 
 
-	<T> Class<? extends T> getType( Class<T> baseType,
-			Integer flavor ) { // Must stay logically paired with obtainInstance -- not super cool but ... for now.
+	<T> Class<? extends T> getType( Class<T> baseType, Integer flavor ) { // Must stay logically paired with obtainInstance -- not super cool but ... for now.
 		Object obj = classToObjectMap.get( baseType );
 		if ( obj != null ) {
 			return (Class<? extends T>) obj.getClass();

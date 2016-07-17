@@ -88,14 +88,14 @@ public class Lazy<T> {
 		Lazy<TYPE> lazy = new Lazy<TYPE>( clazz, flavor );
 		lazy.isInEditMode = parent.isInEditMode();
 		if ( !lazy.isInEditMode ) {
-			initializeNewlyAttainedLazy( lazy, parent );
+			preInitializeNewLazy( lazy, parent );
 		}
 		return lazy;
 	}
 
 	private static final <TYPE> Lazy<TYPE> newInstance( Object parent, Class<TYPE> clazz, Integer flavor ) {
 		Lazy<TYPE> lazy = new Lazy<TYPE>( clazz, flavor );
-		initializeNewlyAttainedLazy( lazy, parent );
+		preInitializeNewLazy( lazy, parent );
 		return lazy;
 	}
 
@@ -114,7 +114,7 @@ public class Lazy<T> {
 		}
 	}
 
-	private static final <TYPE> void initializeNewlyAttainedLazy( Lazy<TYPE> lazy, Object parent ) {
+	private static final <TYPE> void preInitializeNewLazy( Lazy<TYPE> lazy, Object parent ) {
 		Context context = null;
 		Lazy lazyParent = null;
 
@@ -122,7 +122,7 @@ public class Lazy<T> {
 			if ( FuelInjector.isInitialized() ) {
 				// Hopefully this parent has been ignited already and we'll have a Lazy to show for it
 				lazyParent = FuelInjector.findLazyByInstance( parent );
-				if ( Lazy.isInitialized( lazyParent ) ) {
+				if ( Lazy.isPreProcessed( lazyParent ) ) {
 					context = (Context) lazyParent.contextRef.get(); // not sure why this cast is necessary? AndroidStudio fail?
 
 					// Do pre-preocess because we know the parent-lazy and do not need to enqueue
@@ -146,6 +146,8 @@ public class Lazy<T> {
 	}
 
 	Scope scope;
+	boolean preProcessed = false;
+	boolean postProcessed = false;
 
 	Class<T> type; // the type requested, but not necessarily the type to be instantiated
 	Class<?> leafType; // the type to be instantiated, not necessarily the type requested but some derivitive.
@@ -161,26 +163,6 @@ public class Lazy<T> {
 	private boolean isInEditMode;
 	private boolean debug;
 	private WeakReference<Object> parentRef;
-
-	/**
-	 * @param parent
-	 * @param type -- not enforced but MUST match the Parameterized T type. They don't match because types with their own parameterized types won't
-	 * match up :(
-	 */
-	public Lazy( Object parent, Class<T> type ) {
-		this( type );
-		initializeNewlyAttainedLazy( this, parent );
-	}
-
-	/**
-	 * @param parent
-	 * @param type -- not enforced but MUST match the Parameterized T type. They don't match because types with their own parameterized types won't
-	 * match up :(
-	 */
-	public Lazy( Object parent, Class<T> type, boolean useWeakInstance ) {
-		this( type );
-		initializeNewlyAttainedLazy( this, parent );
-	}
 
 	Lazy( Class<T> type ) {
 		this.type = type;
@@ -219,15 +201,18 @@ public class Lazy<T> {
 		}
 	}
 
-	static boolean isInitialized( Lazy lazy ) {
+	static boolean isPostProcessed( Lazy lazy ) {
 		if ( lazy != null ) {
-			return lazy.isInitialized();
+			return lazy.postProcessed;
 		}
 		return false;
 	}
 
-	boolean isInitialized() {
-		return hasContext() && leafType != null;
+	static boolean isPreProcessed( Lazy lazy ) {
+		if ( lazy != null ) {
+			return lazy.preProcessed;
+		}
+		return false;
 	}
 
 	boolean hasContext() {
@@ -240,7 +225,7 @@ public class Lazy<T> {
 			context = contextRef.get();
 		}
 		if ( context == null ) {
-			if ( !isInitialized() ) {
+			if ( !isPostProcessed( this ) ) {
 				throw FuelInjector.doFailure( this, new FuelUnableToObtainContextException( "Never Ignited " + this ) );
 			}
 
@@ -298,7 +283,7 @@ public class Lazy<T> {
 
 	/**
 	 * Not a noob feature -- use this only to late-ignite a lazy with the given context<br>
-	 * Useful when you need a one-off {@link Lazy#attain(Context, Class, Integer)} and the context is provided late or in an odd manner
+	 * Useful when you need a one-off {@link Lazy#attain(Object, Class, Integer)} and the context is provided late or in an odd manner
 	 */
 	public T get( Context context ) throws FuelInjectionException {
 		if ( getContext() == null && parentRef != null ) {
@@ -317,7 +302,6 @@ public class Lazy<T> {
 	 * May return null and will never throw an exception, however the FuelModule.OnLazyGetFailed will be called.
 	 */
 	@NonNull public T get() throws FuelInjectionException {
-		FLog.d( "get() %s", this );
 		T out = getChecked();
 		return out;
 	}
