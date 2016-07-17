@@ -358,7 +358,6 @@ public final class FuelInjector {
 		Scope contextScope = determineScope( context.getClass() );
 		validateScope( contextScope, parent.scope );
 		parent.setLeafType( FuelInjector.toLeafType( parent.type, parent.getFlavor() ) );
-		parent.parentNode = null;
 	}
 
 	/**
@@ -377,7 +376,6 @@ public final class FuelInjector {
 
 		child.scope = determineScope( child.leafType );
 		validateScope( parent.scope, child.scope );
-		child.parentNode = attainWeakLazy( parent );
 
 		child.setLeafType( FuelInjector.toLeafType( child.type, child.getFlavor() ) );
 

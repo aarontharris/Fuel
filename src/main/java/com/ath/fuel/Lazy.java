@@ -11,10 +11,81 @@ import java.lang.ref.WeakReference;
 
 
 public class Lazy<T> {
-	// FIXME: FUEL add an L2 cache that is keyed on Context and CacheKey since we now know the context!
 
-	public static final <TYPE> Lazy<TYPE> attain( View parent, Class<TYPE> clazz ) {
-		Lazy<TYPE> lazy = new Lazy<TYPE>( clazz );
+	/**
+	 * WARN: As of Android 5.0 (ART) An attained lazy accessed from a super-type's constructor may not be available during that period of execution.
+	 * <pre>
+	 * EXAMPLE:
+	 * 	public class Base {
+	 * 		public Base() {
+	 * 			doStuff();
+	 *        }
+	 * 		public void doStuff() {
+	 * 			visitSites();
+	 * 			eatFood();
+	 * 			smellRoses();
+	 *        }
+	 *  }
+	 *  public class Derived extends Base {
+	 * 		private Lazy&lt;Camera&gt; cam = Lazy.attain( this, Camera.class );
+	 * 		public Derived() {
+	 * 			super(); // cam is not yet injected during super-type's constructor.
+	 * 			// cam is now injected and available
+	 *        }
+	 * 		&at;Override
+	 * 		public void doStuff() {
+	 * 			super.doStuff();
+	 * 			cam.get().takePicture(); // FAIL: cam has not yet been injected
+	 *        }
+	 *  }
+	 * </pre>
+	 *
+	 * @param parent the object responsible for the lazy
+	 * @param clazz - the type you wish to attain
+	 * @return Lazy of the given clazz.
+	 */
+	public static final <TYPE> Lazy<TYPE> attain( Object parent, Class<TYPE> clazz ) {
+		return newInstance( parent, clazz, null );
+	}
+
+	/**
+	 * WARN: As of Android 5.0 (ART) An attained lazy accessed from a super-type's constructor may not be available during that period of execution.
+	 * <pre>
+	 * EXAMPLE:
+	 * 	public class Base {
+	 * 		public Base() {
+	 * 			doStuff();
+	 *        }
+	 * 		public void doStuff() {
+	 * 			visitSites();
+	 * 			eatFood();
+	 * 			smellRoses();
+	 *        }
+	 *  }
+	 *  public class Derived extends Base {
+	 * 		private Lazy&lt;Camera&gt; cam = Lazy.attain( this, Camera.class );
+	 * 		public Derived() {
+	 * 			super(); // cam is not yet injected during super-type's constructor.
+	 * 			// cam is now injected and available
+	 *        }
+	 * 		&at;Override
+	 * 		public void doStuff() {
+	 * 			super.doStuff();
+	 * 			cam.get().takePicture(); // FAIL: cam has not yet been injected
+	 *        }
+	 *  }
+	 * </pre>
+	 *
+	 * @param parent the object responsible for the lazy
+	 * @param clazz - the type you wish to attain
+	 * @return Lazy of the given clazz.
+	 */
+	public static final <TYPE> Lazy<TYPE> attain( Object parent, Class<TYPE> clazz, Integer flavor ) {
+		return newInstance( parent, clazz, flavor );
+	}
+
+	private static final <TYPE> Lazy<TYPE> newInstance( View parent, Class<TYPE> clazz, Integer flavor ) {
+		Lazy<TYPE> lazy = new Lazy<TYPE>( clazz, flavor );
 		lazy.isInEditMode = parent.isInEditMode();
 		if ( !lazy.isInEditMode ) {
 			initializeNewlyAttainedLazy( lazy, parent );
@@ -22,165 +93,9 @@ public class Lazy<T> {
 		return lazy;
 	}
 
-	/**
-	 * WARN: As of Android 5.0 (ART) An attained lazy accessed from a super-type's constructor may not be available during that period of execution.
-	 * <pre>
-	 * EXAMPLE:
-	 * 	public class Base {
-	 * 		public Base() {
-	 * 			doStuff();
-	 *        }
-	 * 		public void doStuff() {
-	 * 			visitSites();
-	 * 			eatFood();
-	 * 			smellRoses();
-	 *        }
-	 *  }
-	 *  public class Derived extends Base {
-	 * 		private Lazy&lt;Camera&gt; cam = Lazy.attain( this, Camera.class );
-	 * 		public Derived() {
-	 * 			super(); // cam is not yet injected during super-type's constructor.
-	 * 			// cam is now injected and available
-	 *        }
-	 * 		&at;Override
-	 * 		public void doStuff() {
-	 * 			super.doStuff();
-	 * 			cam.get().takePicture(); // FAIL: cam has not yet been injected
-	 *        }
-	 *  }
-	 * </pre>
-	 *
-	 * @param parent the object responsible for the lazy.
-	 * @param clazz - the type you wish to attain
-	 * @return Lazy of the given clazz.
-	 */
-	public static final <TYPE> Lazy<TYPE> attainDebug( Object parent, Class<TYPE> clazz ) {
-		Lazy<TYPE> out = attain( parent, clazz, true );
-		FLog.d( "FUEL: attain: %s from %s", clazz, parent );
-		return out;
-	}
-
-	public static final <TYPE> Lazy<TYPE> attain( Object parent, Class<TYPE> clazz ) {
-		return attain( parent, clazz, false );
-	}
-
-	private static final <TYPE> Lazy<TYPE> attain( Object parent, Class<TYPE> clazz, boolean debug ) {
-		Lazy<TYPE> lazy = new Lazy<TYPE>( clazz, debug );
-		initializeNewlyAttainedLazy( lazy, parent );
-		return lazy;
-	}
-
-	/**
-	 * WARN: As of Android 5.0 (ART) An attained lazy accessed from a super-type's constructor may not be available during that period of execution.
-	 * <p/>
-	 * <pre>
-	 * EXAMPLE:
-	 * 	public class Base {
-	 * 		public Base() {
-	 * 			doStuff();
-	 *        }
-	 * 		public void doStuff() {
-	 * 			visitSites();
-	 * 			eatFood();
-	 * 			smellRoses();
-	 *        }
-	 *  }
-	 *  public class Derived extends Base {
-	 * 		private Lazy&lt;Camera&gt; cam = Lazy.attain( this, Camera.class );
-	 * 		public Derived() {
-	 * 			super(); // cam is not yet injected during super-type's constructor.
-	 * 			// cam is now injected and available
-	 *        }
-	 * 		&at;Override
-	 * 		public void doStuff() {
-	 * 			super.doStuff();
-	 * 			cam.get().takePicture(); // FAIL: cam has not yet been injected
-	 *        }
-	 *  }
-	 * </pre>
-	 *
-	 * @return Lazy of the given clazz.
-	 */
-	public static final <TYPE> Lazy<TYPE> attain( Context context, Class<TYPE> type ) {
-		Lazy<TYPE> lazy = new Lazy<TYPE>( type );
-		initializeNewlyAttainedLazy( lazy, context );
-		return lazy;
-	}
-
-	/**
-	 * WARN: As of Android 5.0 (ART) An attained lazy accessed from a super-type's constructor may not be available during that period of execution.
-	 * <pre>
-	 * EXAMPLE:
-	 * 	public class Base {
-	 * 		public Base() {
-	 * 			doStuff();
-	 *        }
-	 * 		public void doStuff() {
-	 * 			visitSites();
-	 * 			eatFood();
-	 * 			smellRoses();
-	 *        }
-	 *  }
-	 *  public class Derived extends Base {
-	 * 		private Lazy&lt;Camera&gt; cam = Lazy.attain( this, Camera.class );
-	 * 		public Derived() {
-	 * 			super(); // cam is not yet injected during super-type's constructor.
-	 * 			// cam is now injected and available
-	 *        }
-	 * 		&at;Override
-	 * 		public void doStuff() {
-	 * 			super.doStuff();
-	 * 			cam.get().takePicture(); // FAIL: cam has not yet been injected
-	 *        }
-	 *  }
-	 * </pre>
-	 *
-	 * @param parent the object responsible for the lazy.
-	 * @param clazz - the type you wish to attain
-	 * @return Lazy of the given clazz.
-	 */
-	public static final <TYPE> Lazy<TYPE> attain( Object parent, Class<TYPE> clazz, Integer flavor ) {
+	private static final <TYPE> Lazy<TYPE> newInstance( Object parent, Class<TYPE> clazz, Integer flavor ) {
 		Lazy<TYPE> lazy = new Lazy<TYPE>( clazz, flavor );
 		initializeNewlyAttainedLazy( lazy, parent );
-		return lazy;
-	}
-
-	/**
-	 * WARN: As of Android 5.0 (ART) An attained lazy accessed from a super-type's constructor may not be available during that period of execution.
-	 * <pre>
-	 * EXAMPLE:
-	 * 	public class Base {
-	 * 		public Base() {
-	 * 			doStuff();
-	 *        }
-	 * 		public void doStuff() {
-	 * 			visitSites();
-	 * 			eatFood();
-	 * 			smellRoses();
-	 *        }
-	 *  }
-	 *  public class Derived extends Base {
-	 * 		private Lazy&lt;Camera&gt; cam = Lazy.attain( this, Camera.class );
-	 * 		public Derived() {
-	 * 			super(); // cam is not yet injected during super-type's constructor.
-	 * 			// cam is now injected and available
-	 *        }
-	 * 		&at;Override
-	 * 		public void doStuff() {
-	 * 			super.doStuff();
-	 * 			cam.get().takePicture(); // FAIL: cam has not yet been injected
-	 *        }
-	 *  }
-	 * </pre>
-	 *
-	 * @param context the App, Service, or Activity the lazy is tied to.
-	 * @param clazz - the type you wish to attain
-	 * @param flavor - Tell the injector which flavor of the instance you would like
-	 * @return Lazy of the given clazz.
-	 */
-	public static final <TYPE> Lazy<TYPE> attain( Context context, Class<TYPE> clazz, Integer flavor ) {
-		Lazy<TYPE> lazy = new Lazy<TYPE>( clazz, flavor );
-		initializeNewlyAttainedLazy( lazy, context );
 		return lazy;
 	}
 
@@ -207,7 +122,7 @@ public class Lazy<T> {
 			if ( FuelInjector.isInitialized() ) {
 				// Hopefully this parent has been ignited already and we'll have a Lazy to show for it
 				lazyParent = FuelInjector.findLazyByInstance( parent );
-				if ( lazyParent != null && lazyParent.contextRef != null ) {
+				if ( Lazy.isInitialized( lazyParent ) ) {
 					context = (Context) lazyParent.contextRef.get(); // not sure why this cast is necessary? AndroidStudio fail?
 
 					// Do pre-preocess because we know the parent-lazy and do not need to enqueue
@@ -230,13 +145,10 @@ public class Lazy<T> {
 		}
 	}
 
-	WeakReference<Lazy> parentNode;
 	Scope scope;
-
 
 	Class<T> type; // the type requested, but not necessarily the type to be instantiated
 	Class<?> leafType; // the type to be instantiated, not necessarily the type requested but some derivitive.
-	boolean isActivitySingleton = false;
 	boolean typeIsContext = false;
 	boolean useWeakInstance = false;
 	T instance = null;
@@ -277,11 +189,6 @@ public class Lazy<T> {
 		this.flavor = CacheKey.DEFAULT_FLAVOR;
 	}
 
-	Lazy( Class<T> clazz, boolean debug ) {
-		this( clazz );
-		this.debug = debug;
-	}
-
 	Lazy( Class<T> type, Integer flavor ) {
 		this.type = type;
 		this.typeIsContext = FuelInjector.isContext( type );
@@ -289,9 +196,13 @@ public class Lazy<T> {
 		this.flavor = flavor;
 	}
 
+	public Lazy setDebug() {
+		this.debug = true;
+		return this;
+	}
+
 	void setLeafType( Class<?> leafType ) {
 		this.leafType = leafType;
-		isActivitySingleton = FuelInjector.isActivitySingleton( leafType );
 	}
 
 
@@ -306,6 +217,13 @@ public class Lazy<T> {
 						String.format( "Guessed Context for %s %s @ %s", this, FLog.getSimpleName( elem ), elem.getLineNumber() ) );
 			}
 		}
+	}
+
+	static boolean isInitialized( Lazy lazy ) {
+		if ( lazy != null ) {
+			return lazy.isInitialized();
+		}
+		return false;
 	}
 
 	boolean isInitialized() {
@@ -399,7 +317,7 @@ public class Lazy<T> {
 	 * May return null and will never throw an exception, however the FuelModule.OnLazyGetFailed will be called.
 	 */
 	@NonNull public T get() throws FuelInjectionException {
-		FLog.d("get() %s", this );
+		FLog.d( "get() %s", this );
 		T out = getChecked();
 		return out;
 	}
@@ -497,12 +415,11 @@ public class Lazy<T> {
 			}
 
 
-			return String.format( "Lazy[type='%s', leafType='%s', flavor='%s', instance='%s', parent='%s', context='%s'",
+			return String.format( "Lazy[type='%s', leafType='%s', flavor='%s', instance='%s', context='%s'",
 					( type == null ? null : type.getSimpleName() ),
 					( leafType == null ? null : leafType.getSimpleName() ),
 					flavor,
 					instanceStr,
-					parentNode == null ? null : ( parentNode.get() == null ? null : parentNode.get().type.getSimpleName() ),
 					contextStr
 			);
 		} catch ( Exception e ) {
