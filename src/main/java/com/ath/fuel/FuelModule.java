@@ -19,11 +19,8 @@ import com.ath.fuel.err.FuelInjectionException;
 import com.ath.fuel.err.FuelUnableToObtainInstanceException;
 
 import java.lang.reflect.Constructor;
-import java.util.ArrayList;
-import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
-import java.util.List;
 
 public abstract class FuelModule {
 
@@ -436,11 +433,9 @@ public abstract class FuelModule {
 			// Second try provider map
 			FuelProvider<?> provider = classToProviderMap.get( leafType );
 			if ( provider != null ) {
-				// FIXME: FUEL - maybe we don't need this kneejerk reaction to the contract -- I think FuelModule.getType( baseType ) is always
-				// called and it calls
-				// provider.getType()
-				provider.getType( lazy.type,
-						lazy.getFlavor() ); // Obey contract that provider.getType() will always be called prior to provider.provide()
+				// FIXME: FUEL - maybe we don't need this kneejerk reaction to the contract
+				// FIXME: FUEL - - I think FuelModule.getType( baseType ) is always called and it calls provider.getType()
+				provider.getType( lazy.type, lazy.getFlavor() ); // Obey contract that provider.getType() will always be called prior to provider.provide()
 
 				lazy.instance = provider.provide( lazy, lazy.getParent() );
 
@@ -597,21 +592,19 @@ public abstract class FuelModule {
 		return lazy.instance;
 	}
 
-	// TODO: cache chains ? maybe cache already excludes non @FuelMethods to improve doAnnotLazyInject ?
-	// private HashMap<Class<?>, List<Class<?>>> classChains = new HashMap<Class<?>, List<Class<?>>>();
-
-	private List<Class<?>> getClassChain( Class<?> clazz ) {
-		List<Class<?>> chain = new ArrayList<Class<?>>();
-		chain.add( clazz );
-		Class<?> tmp = clazz;
-		while ( ( tmp = tmp.getSuperclass() ) != null ) {
-			chain.add( tmp );
-		}
-		Collections.reverse( chain );
-		return chain;
-	}
-
-
+	/**
+	 * Find the leaf-most type in the mapping rules for the given baseType<br>
+	 * bind: A -> B<br>
+	 * bind: B -> C<br>
+	 * bind: C -> D<br>
+	 * <br>
+	 * D = getType( A )<br>
+	 *
+	 * @param baseType
+	 * @param flavor - considered for providers
+	 * @param <T>
+	 * @return
+	 */
 	<T> Class<? extends T> getType( Class<T> baseType, Integer flavor ) { // Must stay logically paired with obtainInstance -- not super cool but ... for now.
 		Object obj = classToObjectMap.get( baseType );
 		if ( obj != null ) {

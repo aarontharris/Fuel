@@ -268,14 +268,15 @@ public final class FuelInjector {
 			Collection<Lazy> queue = getPreprocessQueue( parent.getInstance(), true );
 			if ( queue.size() > 0 ) {
 				for ( Lazy lazy : queue ) {
-					doPreProcess( lazy, parent );
+					doPreProcessChild( lazy, parent );
 				}
 				queue.clear();
 			}
 		}
 	}
 
-	static void doServicePreProcess( Lazy lazy, Context context ) {
+	static void doServicePreProcess( Lazy lazy ) {
+		Context context = lazy.getContext();
 
 		if ( lazy.isDebug() ) {
 			FLog.leaveBreadCrumb( "doServicePreProcess for %s, context is %s", lazy, context == null ? "null" : context.getClass().getSimpleName() );
@@ -299,12 +300,23 @@ public final class FuelInjector {
 	}
 
 	static void doPreProcessParent( Lazy parent, Context context ) {
-		parent.setLeafType( FuelInjector.toLeafType( parent.type, parent.getFlavor() ) );
-		parent.setContext( context, false );
-		parent.scope = determineScope( parent.leafType );
-		Scope contextScope = determineScope( context.getClass() );
-		validateScope( contextScope, parent.scope );
-		parent.preProcessed = true;
+		doPreProcessCommon( parent, context );
+	}
+
+	static void doPreProcessCommon( Lazy lazy, Context context ) {
+		Context lazyContext = context;
+		lazy.setLeafType( FuelInjector.toLeafType( lazy.type, lazy.getFlavor() ) );
+
+		// Override with App Context if App Singleton to be safe
+		if ( isAppSingleton( lazy.leafType ) ) {
+			lazyContext = getApp();
+		}
+
+		lazy.setContext( lazyContext, false );
+		lazy.scope = determineScope( lazy.leafType );
+		Scope contextScope = determineScope( lazyContext.getClass() );
+		validateScope( contextScope, lazy.scope );
+		lazy.preProcessed = true;
 	}
 
 	/**
@@ -312,42 +324,25 @@ public final class FuelInjector {
 	 * We initialize the child-lazy now that we know the context.
 	 * We call this PreProcess because its before the parent has called child-lazy.get()
 	 * though don't be confused, this is AFTER the lazy has been de-queued.
+	 *
+	 * @param child - assumes not yet preProcessed
+	 * @param parent - must be postProcessed and have instance/context
 	 */
-	static void doPreProcess( Lazy child, Lazy parent ) throws FuelUnableToObtainContextException, FuelScopeViolationException {
+	static void doPreProcessChild( Lazy child, Lazy parent ) throws FuelUnableToObtainContextException, FuelScopeViolationException {
 		Context context = parent.getContext();
-		if ( child.isDebug() ) {
-			FLog.leaveBreadCrumb( "doPreProcess for %s, context is %s", child, context == null ? "null" : context.getClass().getSimpleName() );
-		}
 
-		Context lazyContext = context;
-
-		child.setLeafType( FuelInjector.toLeafType( child.type, child.getFlavor() ) );
 		child.scope = determineScope( child.leafType );
 		validateScope( parent.scope, child.scope );
-
-
-		if ( isAppSingleton( child.leafType ) ) {
-			lazyContext = getApp();
-			if ( child.isDebug() ) {
-				FLog.leaveBreadCrumb( "doPreProcess for app singleton %s, so context is %s", child,
-						context == null ? "null" : context.getClass().getSimpleName() );
-			}
-		}
-
-		child.setContext( lazyContext, false );
+		child.fragRef = parent.fragRef; // if any
+		doPreProcessCommon( child, context );
 
 		if ( child.isDebug() ) {
-			FLog.leaveBreadCrumb( "doPreProcess for %s, context ended up with %s", child,
-					context == null ? "null" : context.getClass().getSimpleName() );
+			FLog.leaveBreadCrumb( "doPreProcessChild for %s, context ended up with %s", child, context == null ? "null" : context.getClass().getSimpleName() );
 		}
 
 		if ( isService( child.leafType ) ) {
-			doServicePreProcess( child, lazyContext );
+			doServicePreProcess( child );
 		}
-
-		// ignite( context, child.instance );
-
-		child.preProcessed = true;
 	}
 
 	static Scope determineScope( Class leafType ) {

@@ -102,6 +102,11 @@ public class Lazy<T> {
 	static final Lazy newEmptyParent( Object parent ) {
 		Lazy lazy = new Lazy( parent.getClass() );
 		lazy.setInstance( parent );
+
+		if ( FuelInjector.isFragment( parent.getClass() ) ) {
+			lazy.fragRef = new WeakReference( parent );
+		}
+
 		return lazy;
 	}
 
@@ -134,7 +139,7 @@ public class Lazy<T> {
 					context = (Context) lazyParent.contextRef.get(); // not sure why this cast is necessary? AndroidStudio fail?
 
 					// Do pre-preocess because we know the parent-lazy and do not need to enqueue
-					FuelInjector.doPreProcess( lazy, lazyParent );
+					FuelInjector.doPreProcessChild( lazy, lazyParent );
 				}
 			}
 		} catch ( FuelInjectionException e ) {
@@ -156,6 +161,7 @@ public class Lazy<T> {
 	Scope scope;
 	boolean preProcessed = false;
 	boolean postProcessed = false;
+	WeakReference<Object> fragRef; // We do object bcuz we dont know if its v4.frag or just frag :/
 
 	Class<T> type; // the type requested, but not necessarily the type to be instantiated
 	Class<?> leafType; // the type to be instantiated, not necessarily the type requested but some derivitive.
