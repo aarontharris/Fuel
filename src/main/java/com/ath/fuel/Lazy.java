@@ -143,13 +143,13 @@ public class Lazy<T> {
 		}
 
 		if ( lazyParent == null ) {
-			lazyParent = newEmptyParent( parent );
-			FuelInjector.rememberLazyByInstance( parent, lazyParent );
+			//lazyParent = newEmptyParent( parent );
+			//FuelInjector.rememberLazyByInstance( parent, lazyParent );
 		}
 
 		if ( context == null ) {
 			// queue up this lazy until the parent is ignited
-			FuelInjector.enqueueLazy( lazyParent, lazy );
+			FuelInjector.enqueueLazy( parent, lazy );
 		}
 	}
 

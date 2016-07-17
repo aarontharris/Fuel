@@ -266,12 +266,9 @@ public final class FuelInjector {
 	 * @param parent must have a lazy
 	 * @param lazy
 	 */
-	static void enqueueLazy( Lazy parent, Lazy lazy ) {
+	static void enqueueLazy( Object parent, Lazy lazy ) {
 		synchronized ( parent ) {
-			if ( parent.getInstance() == null ) {
-				throw new FuelInvalidParentException( "ParentLazy has no instance but attempting to enqueue child. Parent=%s, Child=%s", parent, lazy );
-			}
-			Collection<Lazy> queue = getPreprocessQueue( parent.getInstance(), false );
+			Collection<Lazy> queue = getPreprocessQueue( parent, false );
 			queue.add( lazy );
 		}
 	}
