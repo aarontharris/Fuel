@@ -298,8 +298,11 @@ public final class FuelInjector {
 
 	static void doPreProcessParent( Lazy parent, Context context ) {
 		doPreProcessCommon( parent, context );
-		parent.scope = determineScope( parent.leafType );
 		Scope contextScope = determineScope( parent.getContext().getClass() );
+		parent.scope = determineScope( parent.leafType );
+		if ( Scope.Object.equals( parent.scope ) ) { // Object scopes should inherit their parent scope
+			parent.scope = contextScope;
+		}
 		validateScope( parent.scope, contextScope );
 	}
 
@@ -330,10 +333,10 @@ public final class FuelInjector {
 
 		doPreProcessCommon( child, context );
 		child.scope = determineScope( child.leafType );
-		validateScope( parent.scope, child.scope );
 		if ( Scope.Object.equals( child.scope ) ) { // Object scopes should inherit their parent scope
 			child.scope = parent.scope;
 		}
+		validateScope( parent.scope, child.scope );
 		child.setScopeObjectRef( parent.getScopeObjectRef() );
 
 		if ( child.isDebug() ) {
