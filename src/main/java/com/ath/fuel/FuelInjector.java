@@ -24,12 +24,9 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.LinkedList;
 import java.util.Map;
-import java.util.Map.Entry;
 import java.util.Queue;
-import java.util.Set;
 import java.util.WeakHashMap;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
@@ -185,13 +182,6 @@ public final class FuelInjector {
 			// skip wrappers
 			context = toContext( context );
 
-
-			// In the case of a service, we need to plug it into the cache after it calls ignite because we cant construct it
-			if ( instance instanceof Service ) {
-				CacheKey key = CacheKey.attain( instance.getClass() );
-				injector.putObjectByContextType( context, key, instance );
-			}
-
 			// whatever this is we're igniting, it wasn't injected so lets artificially create a lazy for it
 			// so that its children can find their parent
 			//rememberContext( instance, context );
@@ -200,13 +190,20 @@ public final class FuelInjector {
 				parent = Lazy.newEmptyParent( instance );
 			}
 
-			if ( !Lazy.isPreProcessed( parent ) ) {
-				doPreProcessParent( parent, context );
+			// In the case of a service, we need to plug it into the cache after it calls ignite because we cant construct it
+			if ( isService( instance.getClass() ) ) {
+				CacheKey key = CacheKey.attain( instance.getClass() );
+				injector.putObjectByContextType( parent, key, instance );
+			} else {
+				if ( !Lazy.isPreProcessed( parent ) ) {
+					doPreProcessParent( parent, context );
+				}
+
+				if ( !Lazy.isPostProcessed( parent ) ) {
+					getFuelModule().initializeNewInstance( parent );
+				}
 			}
 
-			if ( !Lazy.isPostProcessed( parent ) ) {
-				getFuelModule().initializeNewInstance( parent );
-			}
 
 			// Kind of a hack
 			// We only do it if its not a singleton because
@@ -288,7 +285,7 @@ public final class FuelInjector {
 		if ( isService( lazy.leafType ) ) {
 			CacheKey key = CacheKey.attain( lazy.leafType );
 			// FLog.d( "SERVICE: doServicePreProcess get Service: %s", lazy.leafType.getSimpleName() );
-			Object service = getServiceInstance( context, key, false );
+			Object service = getServiceInstance( lazy, key, false );
 			if ( service != null ) {
 				// FLog.d( "SERVICE: doServicePreProcess got Service: %s = %s", lazy.leafType.getSimpleName(), service );
 				lazy.instance = service;
@@ -301,6 +298,9 @@ public final class FuelInjector {
 
 	static void doPreProcessParent( Lazy parent, Context context ) {
 		doPreProcessCommon( parent, context );
+		parent.scope = determineScope( parent.leafType );
+		Scope contextScope = determineScope( parent.getContext().getClass() );
+		validateScope( parent.scope, contextScope );
 	}
 
 	static void doPreProcessCommon( Lazy lazy, Context context ) {
@@ -313,9 +313,6 @@ public final class FuelInjector {
 		}
 
 		lazy.setContext( lazyContext, false );
-		lazy.scope = determineScope( lazy.leafType );
-		Scope contextScope = determineScope( lazyContext.getClass() );
-		validateScope( contextScope, lazy.scope );
 		lazy.preProcessed = true;
 	}
 
@@ -331,10 +328,10 @@ public final class FuelInjector {
 	static void doPreProcessChild( Lazy child, Lazy parent ) throws FuelUnableToObtainContextException, FuelScopeViolationException {
 		Context context = parent.getContext();
 
+		doPreProcessCommon( child, context );
 		child.scope = determineScope( child.leafType );
 		validateScope( parent.scope, child.scope );
-		child.fragRef = parent.fragRef; // if any
-		doPreProcessCommon( child, context );
+		child.setScopeObjectRef( parent.getScopeObjectRef() );
 
 		if ( child.isDebug() ) {
 			FLog.leaveBreadCrumb( "doPreProcessChild for %s, context ended up with %s", child, context == null ? "null" : context.getClass().getSimpleName() );
@@ -349,6 +346,8 @@ public final class FuelInjector {
 		if ( leafType != null ) {
 			// ordered by precedence
 			if ( isFragmentSingleton( leafType ) ) {
+				return Scope.Fragment;
+			} else if ( isFragment( leafType ) ) {
 				return Scope.Fragment;
 			} else if ( isActivitySingleton( leafType ) ) {
 				return Scope.Activity;
@@ -365,9 +364,16 @@ public final class FuelInjector {
 		return Scope.Undef;
 	}
 
-	static void validateScope( Scope parent, Scope child ) throws FuelScopeViolationException {
-		if ( parent == null || child == null || !parent.canAccess( child ) ) {
-			throw new FuelScopeViolationException( "Fuel Scope Violation: %s cannot access %s", parent, child );
+	/**
+	 * Can a access b ?
+	 *
+	 * @param a
+	 * @param b
+	 * @throws FuelScopeViolationException
+	 */
+	static void validateScope( Scope a, Scope b ) throws FuelScopeViolationException {
+		if ( a == null || b == null || !a.canAccess( b ) ) {
+			throw new FuelScopeViolationException( "Fuel Scope Violation: %s cannot access %s", a, b );
 		}
 	}
 
@@ -494,14 +500,14 @@ public final class FuelInjector {
 	 * Does not attain, only returns an item that is already in the cache or null.
 	 */
 	@Nullable public static final <T> T findInstance( Context context, Class<T> type ) {
-		return getInstance( context, CacheKey.attain( type ), false );
+		return getInstance( context, CacheKey.attain( type ), null, false );
 	}
 
 	/**
 	 * Does not attain, only returns an item that is already in the cache or null.
 	 */
 	@Nullable public static final <T> T findInstance( Context context, Class<T> type, Integer flavor ) {
-		return getInstance( context, CacheKey.attain( type, flavor ), false );
+		return getInstance( context, CacheKey.attain( type, flavor ), null, false );
 	}
 
 	static boolean isApplication( Class<?> leafType ) {
@@ -529,7 +535,7 @@ public final class FuelInjector {
 		return Context.class.isAssignableFrom( leafType );
 	}
 
-	static final <T> T getInstance( Context context, CacheKey key, boolean debug ) {
+	static final <T> T getInstance( Context context, CacheKey key, @Nullable Lazy lazy, boolean debug ) {
 		// if ( Application.class.isAssignableFrom( key.getLeafType() ) ) {
 		// return (T) getApp();
 		// } else if ( Activity.class.isAssignableFrom( key.getLeafType() ) ) {
@@ -559,13 +565,16 @@ public final class FuelInjector {
 				FLog.leaveBreadCrumb( "getInstance for App got %s", getApp() == null ? "null" : getApp().getClass().getSimpleName() );
 			}
 			return (T) getApp();
+		} else if ( isFragment( key.getLeafType() ) ) {
+			WeakReference fragRef = lazy.getScopeObjectRef();
+			return (T) ( fragRef == null ? null : fragRef.get() );
 		} else if ( isActivity( key.getLeafType() ) && context instanceof Activity ) {
 			if ( debug ) {
 				FLog.leaveBreadCrumb( "getInstance for Activity got %s", context == null ? "null" : context.getClass().getSimpleName() );
 			}
 			return (T) context;
 		} else if ( isService( key.getLeafType() ) ) {
-			final T serviceInstance = getServiceInstance( context, key, true );
+			final T serviceInstance = getServiceInstance( lazy, key, true );
 			if ( debug ) {
 				FLog.leaveBreadCrumb( "getInstance for Service got %s",
 						serviceInstance == null ? "null" : serviceInstance.getClass().getSimpleName() );
@@ -578,7 +587,7 @@ public final class FuelInjector {
 			return (T) context;
 		}
 
-		final T objectByContextType = (T) injector.getObjectByContextType( context, key );
+		final T objectByContextType = (T) injector.getObjectByContextType( lazy, key );
 		if ( debug ) {
 			FLog.leaveBreadCrumb( "getInstance getObjectByContextType got %s", objectByContextType == null ? "null" : objectByContextType.getClass()
 					.getSimpleName() );
@@ -589,7 +598,7 @@ public final class FuelInjector {
 
 	// FIXME: need an attainService and getService
 	// Currently ignite is talking directly to the cache and is messy :(
-	private static final <T> T getServiceInstance( Context context, CacheKey key, boolean willingToWait ) {
+	private static final <T> T getServiceInstance( Lazy lazy, CacheKey key, boolean willingToWait ) {
 		boolean inMainThread = inMainThread();
 		long maxTimeMillis = 1000;
 		long sleepTimeMillis = 20;
@@ -600,7 +609,7 @@ public final class FuelInjector {
 			try {
 				++loopCount;
 
-				T object = (T) injector.getObjectByContextType( getApp(), key );
+				T object = (T) injector.getObjectByContextType( lazy, key );
 				if ( object != null ) {
 					// FLog.d( "SERVICE: getInstance[%s][%s] of %s got %s", loopCount, duration, key.getLeafType().getSimpleName(), object );
 					return object;
@@ -643,7 +652,7 @@ public final class FuelInjector {
 					FLog.leaveBreadCrumb( "newInstance for singleton %s", lazy );
 				}
 				synchronized ( lazy.leafType ) { // FIXME: concurrency fail since classes are not guaranteed to be the same instance
-					object = (T) injector.getObjectByContextType( lazy.getContext(), key );
+					object = (T) injector.getObjectByContextType( lazy, key );
 					if ( lazy.isDebug() ) {
 						FLog.leaveBreadCrumb( "newInstance getObjectByContextType returned %s for %s",
 								object == null ? "null" : object.getClass().getSimpleName(),
@@ -657,7 +666,7 @@ public final class FuelInjector {
 									lazy );
 						}
 						if ( object != null ) {
-							injector.putObjectByContextType( lazy.getContext(), key, object );
+							injector.putObjectByContextType( lazy, key, object );
 						}
 					}
 				}
@@ -691,7 +700,7 @@ public final class FuelInjector {
 				FLog.leaveBreadCrumb( "attainInstance for key: %s and lazy: %s", key, lazy );
 			}
 
-			T obj = getInstance( lazy.getContext(), key, lazy.isDebug() ); // go into getInstance here. grrrr.
+			T obj = getInstance( lazy.getContext(), key, lazy, lazy.isDebug() ); // go into getInstance here. grrrr.
 			if ( lazy.isDebug() ) {
 				FLog.leaveBreadCrumb( "attainInstance getInstance returned %s", obj == null ? "null" : obj.getClass().getSimpleName() );
 			}
@@ -748,7 +757,15 @@ public final class FuelInjector {
 
 	private static long mainThreadId;
 	private FuelModule fuelModule;
-	private final WeakHashMap<Context, Map<CacheKey, Object>> cache = new WeakHashMap<Context, Map<CacheKey, Object>>(); // context to injectable
+//	private final WeakHashMap<Context, Map<CacheKey, Object>> cache = new WeakHashMap<>(); // context to injectable
+
+	// Scope -> ScopeObject -> CacheKey -> instance
+	// - Scope is Application, Activity, Fragment, etc
+	// - ScopeObject would be the context, or the fragment, paired to the scope
+	// - CacheKey describes the instance we're looking for
+	// - instance the hidden treasure
+	private final Map<Scope, WeakHashMap<Object, Map<CacheKey, Object>>> scopeCache = new HashMap<>();
+
 	// map (not WeakReference of injectable)
 	private final WeakHashMap<Context, WeakReference<Context>> contextToWeakContextCache = new WeakHashMap<Context, WeakReference<Context>>();
 	static final long startTimeMillis = System.currentTimeMillis();
@@ -766,73 +783,86 @@ public final class FuelInjector {
 		return null;
 	}
 
-	private void clearContextCache( Context context ) {
-		Lock lock = cacheLock.writeLock();
-		try {
-			lock.lock();
-			cache.remove( context );
-		} catch ( Exception e ) {
-			FLog.e( e );
-		} finally {
-			lock.unlock();
+	/**
+	 * Some scopes are consolidated into a shared cache use this to get the cacheScope based on the literal scope
+	 *
+	 * @param lazy
+	 * @return null indicates this lazy is not cacheable
+	 */
+	@Nullable Scope toCacheScope( Lazy lazy ) {
+		switch ( lazy.scope ) {
+			case Application:
+			case Activity:
+			case Fragment:
+				return lazy.scope;
 		}
+		return null;
 	}
 
-	private static final Map<CacheKey, Object> EMPTY_MAP = new HashMap<CacheKey, Object>();
+	/**
+	 * @param lazy
+	 * @return null indicates this lazy is not cacheable
+	 */
+	@Nullable Object toObjectScope( Lazy lazy ) {
+		Object scopeObject = null;
+		Scope scope = toCacheScope( lazy );
+		if ( scope != null ) {
+			switch ( scope ) {
+				case Application:
+				case Activity:
+					scopeObject = lazy.getContext();
+					break;
+				case Fragment:
+					scopeObject = lazy.getScopeObjectRef() == null ? null : lazy.getScopeObjectRef().get();
+					break;
+			}
+		}
+		return scopeObject;
+	}
+
+	boolean isCacheable( Lazy lazy ) {
+		return toCacheScope( lazy ) != null && toObjectScope( lazy ) != null;
+	}
 
 	/**
-	 * @param context
 	 * @param primeTheCacheEntry if true, an empty entry will be added for this context if not already present, false leaves it alone and returns
 	 * empty
-	 * @return
+	 * @return an "immutable" map when primeTheCachEntry = false :/ meh
 	 */
-	private Map<CacheKey, Object> getCacheByContextNotThreadSafe( Context context, boolean primeTheCacheEntry ) {
-		Map<CacheKey, Object> contextCache = cache.get( context );
-		if ( contextCache == null ) {
-			if ( primeTheCacheEntry ) {
-				contextCache = new HashMap<CacheKey, Object>();
-				cache.put( context, contextCache );
-			} else {
-				return EMPTY_MAP;
+	private Map<CacheKey, Object> getCacheByContextNotThreadSafe( Lazy lazy, boolean primeTheCacheEntry ) {
+		Map<CacheKey, Object> contextCache = null;
+		Scope cacheScope = toCacheScope( lazy );
+		Object scopeObject = toObjectScope( lazy );
+
+		// if either are null then this lazy is not cacheable
+		if ( cacheScope != null && scopeObject != null ) {
+			WeakHashMap<Object, Map<CacheKey, Object>> cache = scopeCache.get( cacheScope );
+			if ( cache == null ) {
+				cache = new WeakHashMap<>();
+				scopeCache.put( cacheScope, cache );
 			}
+
+			contextCache = cache.get( scopeObject );
+			if ( contextCache == null ) {
+				if ( primeTheCacheEntry ) {
+					contextCache = new HashMap<>();
+					cache.put( scopeObject, contextCache );
+				}
+			}
+		}
+
+		// Shouldn't be able to prime the cache if not cacheable -- but potential fail
+		if ( contextCache == null ) {
+			contextCache = Collections.emptyMap();
 		}
 		return contextCache;
 	}
 
-	private Set<Object> getAllObjectsByContext( Context context ) {
+	private Object getObjectByContextType( Lazy lazy, CacheKey key ) {
 		Lock lock = cacheLock.readLock();
 		try {
 			lock.lock();
-			Set<Object> out = new HashSet<Object>( getCacheByContextNotThreadSafe( context, false ).values() );
-			return out;
-		} finally {
-			lock.unlock();
-		}
-	}
-
-	private Set<Object> getAllObjects() {
-		Lock lock = cacheLock.readLock();
-		try {
-			lock.lock();
-			Set<Object> out = new HashSet<Object>();
-			Set<Entry<Context, Map<CacheKey, Object>>> entries = cache.entrySet();
-			// for ( Entry<Context, Map<CacheKey, Object>> entry : entries ) {
-			// out.addAll( entry.getValue().values() );
-			// }
-			for ( Context context : cache.keySet() ) {
-				out.addAll( getCacheByContextNotThreadSafe( context, false ).values() );
-			}
-			return out;
-		} finally {
-			lock.unlock();
-		}
-	}
-
-	private Object getObjectByContextType( Context context, CacheKey key ) {
-		Lock lock = cacheLock.readLock();
-		try {
-			lock.lock();
-			Map<CacheKey, Object> contextCache = getCacheByContextNotThreadSafe( context, false );
+			Map<CacheKey, Object> contextCache = getCacheByContextNotThreadSafe( lazy, false );
 			Object obj = contextCache.get( key );
 			return obj;
 		} finally {
@@ -843,11 +873,11 @@ public final class FuelInjector {
 	/**
 	 * @param value instance not lazy, cannot be null
 	 */
-	private void putObjectByContextType( Context context, CacheKey key, Object value ) {
+	private void putObjectByContextType( Lazy lazy, CacheKey key, Object value ) {
 		Lock lock = cacheLock.writeLock();
 		try {
 			lock.lock();
-			Map<CacheKey, Object> contextCache = getCacheByContextNotThreadSafe( context, true );
+			Map<CacheKey, Object> contextCache = getCacheByContextNotThreadSafe( lazy, true );
 			contextCache.put( key, value );
 		} finally {
 			lock.unlock();

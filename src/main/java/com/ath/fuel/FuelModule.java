@@ -525,7 +525,7 @@ public abstract class FuelModule {
 				Class toType = getType( type, CacheKey.DEFAULT_FLAVOR ); // FIXME: FUEL args should support flavors
 
 				CacheKey key = CacheKey.attain( toType );
-				Object o = FuelInjector.getInstance( context, key, lazy.isDebug() );
+				Object o = FuelInjector.getInstance( context, key, lazy, lazy.isDebug() );
 				if ( o == null ) {
 					// here we say false because we dont want to allow non mapped or non singletons to be instantiated for constructor args.
 					// If a constructor takes an Integer as an argument, do you think its expecting a new Integer() ? probably not

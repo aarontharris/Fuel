@@ -104,7 +104,7 @@ public class Lazy<T> {
 		lazy.setInstance( parent );
 
 		if ( FuelInjector.isFragment( parent.getClass() ) ) {
-			lazy.fragRef = new WeakReference( parent );
+			lazy.setScopeObjectRef( new WeakReference( parent ) );
 		}
 
 		return lazy;
@@ -128,10 +128,6 @@ public class Lazy<T> {
 		Lazy lazyParent = null;
 
 		try {
-			if ( lazy.type.getSimpleName().equals( "SampleAppSingleton" ) ) {
-				FLog.d("found it");
-			}
-
 			if ( FuelInjector.isInitialized() ) {
 				// Hopefully this parent has been ignited already and we'll have a Lazy to show for it
 				lazyParent = FuelInjector.findLazyByInstance( parent );
@@ -147,11 +143,6 @@ public class Lazy<T> {
 			lazy.contextRef = null; // reset
 		}
 
-		if ( lazyParent == null ) {
-			//lazyParent = newEmptyParent( parent );
-			//FuelInjector.rememberLazyByInstance( parent, lazyParent );
-		}
-
 		if ( context == null ) {
 			// queue up this lazy until the parent is ignited
 			FuelInjector.enqueueLazy( parent, lazy );
@@ -161,7 +152,8 @@ public class Lazy<T> {
 	Scope scope;
 	boolean preProcessed = false;
 	boolean postProcessed = false;
-	WeakReference<Object> fragRef; // We do object bcuz we dont know if its v4.frag or just frag :/
+
+	private WeakReference<Object> scopeObjectRef; // We do object bcuz we dont know if its v4.frag or just frag :/
 
 	Class<T> type; // the type requested, but not necessarily the type to be instantiated
 	Class<?> leafType; // the type to be instantiated, not necessarily the type requested but some derivitive.
@@ -190,6 +182,14 @@ public class Lazy<T> {
 		this.typeIsContext = FuelInjector.isContext( type );
 		this.useWeakInstance = this.useWeakInstance || this.typeIsContext; // don't override useWeakInstance if already true
 		this.flavor = flavor;
+	}
+
+	void setScopeObjectRef( WeakReference<Object> scopeObjectRef ) {
+		this.scopeObjectRef = scopeObjectRef;
+	}
+
+	WeakReference<Object> getScopeObjectRef() {
+		return scopeObjectRef;
 	}
 
 	public Lazy setDebug() {
@@ -391,6 +391,12 @@ public class Lazy<T> {
 
 	@Override
 	public String toString() {
+//		String ref = getScopeObjectRef() == null ? "null" : String.valueOf( getScopeObjectRef().hashCode() );
+//		String refer = getScopeObjectRef() == null ? "null" : String.valueOf( getScopeObjectRef().get().hashCode() );
+//		return String.format( "%s, %s, %s", this.hashCode(), ref, refer );
+//	}
+//
+//	public String xtoString() {
 		try {
 			String instanceStr = "null";
 			if ( getInstance() != null ) {
