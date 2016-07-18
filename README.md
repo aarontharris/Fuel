@@ -9,6 +9,6 @@ FAST, simple, easy to use and very easy to get started dependency injection fram
 # Fuel Submodule
 Clone the Fuel submodule under your project folder
 ```
-git submodule add -b Fuel git@github.com:aarontharris/Fuel.git
+git submodule add -b master git@github.com:aarontharris/Fuel.git Fuel
 ```
 
