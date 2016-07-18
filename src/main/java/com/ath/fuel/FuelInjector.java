@@ -331,6 +331,9 @@ public final class FuelInjector {
 		doPreProcessCommon( child, context );
 		child.scope = determineScope( child.leafType );
 		validateScope( parent.scope, child.scope );
+		if ( Scope.Object.equals( child.scope ) ) { // Object scopes should inherit their parent scope
+			child.scope = parent.scope;
+		}
 		child.setScopeObjectRef( parent.getScopeObjectRef() );
 
 		if ( child.isDebug() ) {
@@ -361,7 +364,7 @@ public final class FuelInjector {
 				return Scope.Application;
 			}
 		}
-		return Scope.Undef;
+		return Scope.Object;
 	}
 
 	/**
@@ -857,6 +860,8 @@ public final class FuelInjector {
 		}
 		return contextCache;
 	}
+
+	// FIXME: only call if isSingleton !
 
 	private Object getObjectByContextType( Lazy lazy, CacheKey key ) {
 		Lock lock = cacheLock.readLock();

@@ -8,8 +8,6 @@ public enum Scope {
 	Activity( 2 ), // Lives for the duration of the Activity and has visibility to Activity and Application scope.
 	Fragment( 3 ), // Lives for the duration of the Fragment and has visibility to Fragment, Activity, Application scope.
 	Object( 0 ),  // Lives as long as object is alive and has no visibility to any of the above scopes.
-	None( 0 ),  // Is not scoped, a new object will be instantiated each time.
-	Undef( 0 ) // A scope is not assigned
 	// TODO: if you add a new scope, consider FuelInjector.toCacheScope( scope )
 	;
 
@@ -44,7 +42,7 @@ public enum Scope {
 				return true;
 			}
 
-			// Evryone can access Object, None, Undef
+			// Evryone can access Object
 			if ( scope.mScopeValue == 0 ) {
 				return true;
 			}
