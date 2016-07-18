@@ -15,21 +15,14 @@ import android.view.View;
 import android.widget.AdapterView;
 import android.widget.ArrayAdapter;
 
+import com.ath.fuel.err.FuelInjectionException;
+import com.ath.fuel.err.FuelUnableToObtainInstanceException;
+
 import java.lang.reflect.Constructor;
-import java.lang.reflect.InvocationTargetException;
-import java.lang.reflect.Method;
-import java.util.ArrayList;
-import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
-import java.util.List;
 
 public abstract class FuelModule {
-
-	public static interface OnLazyGetFailed {
-		public void onFail( FuelInjectionException e );
-	}
-
 
 	/**
 	 * Provider is cached with the context associated with the type it returns<br>
@@ -80,7 +73,6 @@ public abstract class FuelModule {
 		public abstract T get( Context context );
 	}
 
-	private OnLazyGetFailed lazyGetFailedListener;
 	private final HashMap<Class<?>, Class<?>> classToClassMap = new HashMap<Class<?>, Class<?>>();
 	private final HashMap<Class<?>, Object> classToObjectMap = new HashMap<Class<?>, Object>();
 	private final HashMap<Class<?>, FuelProvider> classToProviderMap = new HashMap<Class<?>, FuelModule.FuelProvider>();
@@ -187,9 +179,29 @@ public abstract class FuelModule {
 	/**
 	 * Called whenever a new instance is obtained by Fuel.<br>
 	 * For Singletons it should only be once per scope.<br>
-	 * Does not get called for non singletons.<br>
+	 * Only called for Singletons.
 	 */
+	@CallSuper
 	protected void onObtainNewSingleton( Object instance ) {
+		try {
+			if ( instance instanceof OnFueled ) {
+				( (OnFueled) instance ).onFueled();
+			}
+		} catch ( Exception e ) {
+			FLog.e( e );
+		}
+	}
+
+
+	/**
+	 * Called when a critical failure occurs and Fuel is unable to recover.<br>
+	 * Please see derived types of {@link FuelInjectionException} for details on conditions that may cause this method to be called.
+	 *
+	 * @param lazy the culprit
+	 * @param exception what went wrong
+	 */
+	protected void onFailure( Lazy lazy, FuelInjectionException exception ) {
+		throw exception;
 	}
 
 	/**
@@ -239,23 +251,15 @@ public abstract class FuelModule {
 	@CallSuper
 	protected final Context provideContext( Class<?> type ) {
 		if ( type != null ) {
-			if ( Application.class.isAssignableFrom( type ) ) {
+			if ( FuelInjector.isApplication( type ) ) {
 				return FuelInjector.getApp(); // may be null if not initialized
-			} else if ( Service.class.isAssignableFrom( type ) ) {
+			} else if ( FuelInjector.isService( type ) ) {
 				return FuelInjector.getApp(); // may be null if not initialized
 			} else if ( FuelInjector.isAppSingleton( type ) ) {
 				return FuelInjector.getApp(); // may be null if not initialized
 			}
 		}
 		return null;
-	}
-
-	protected void setOnLazyGetFailedListener( OnLazyGetFailed listener ) {
-		this.lazyGetFailedListener = listener;
-	}
-
-	OnLazyGetFailed getOnLazyGetFailedListener() {
-		return this.lazyGetFailedListener;
 	}
 
 	protected void logD( String message ) {
@@ -288,14 +292,12 @@ public abstract class FuelModule {
 	 * <pre>
 	 * Override to set up your own injection configurations here.
 	 * Call super.configure() for default configurations.
-	 *
 	 * Default Configurations (Overridable here)
 	 *  {@link LayoutInflater}
 	 *  {@link ConnectivityManager}
 	 *  {@link AlarmManager}
 	 *  {@link LocationManager}
 	 *  {@link NotificationManager}
-	 *
 	 * Automatically handed by FuelInjector (not Overridable)
 	 *   {@link Context} -- Will attempt to inject Activity but will fall back on Application.
 	 *   {@link Activity} -- Will only inject Activity, unlike Context
@@ -330,7 +332,7 @@ public abstract class FuelModule {
 
 	/**
 	 * Add a mapping rule for Class to Class.<br>
-	 * When you {@link Lazy#attain(Context, Class, Integer)}, the Class can be a base-interface and
+	 * When you {@link Lazy#attain(Object, Class, Integer)}, the Class can be a base-interface and
 	 * Fuel will search the Mapping Rules to decide the best instance.<br>
 	 * <br>
 	 * EX:<br>
@@ -431,11 +433,9 @@ public abstract class FuelModule {
 			// Second try provider map
 			FuelProvider<?> provider = classToProviderMap.get( leafType );
 			if ( provider != null ) {
-				// FIXME: FUEL - maybe we don't need this kneejerk reaction to the contract -- I think FuelModule.getType( baseType ) is always
-				// called and it calls
-				// provider.getType()
-				provider.getType( lazy.type,
-						lazy.getFlavor() ); // Obey contract that provider.getType() will always be called prior to provider.provide()
+				// FIXME: FUEL - maybe we don't need this kneejerk reaction to the contract
+				// FIXME: FUEL - - I think FuelModule.getType( baseType ) is always called and it calls provider.getType()
+				provider.getType( lazy.type, lazy.getFlavor() ); // Obey contract that provider.getType() will always be called prior to provider.provide()
 
 				lazy.instance = provider.provide( lazy, lazy.getParent() );
 
@@ -456,8 +456,7 @@ public abstract class FuelModule {
 				return initializeNewInstance( lazy );
 			}
 
-			if ( otherInjectables.contains( leafType ) || leafType.isAnnotationPresent( ActivitySingleton.class ) || leafType
-					.isAnnotationPresent( AppSingleton.class ) ) {
+			if ( FuelInjector.isSingleton( leafType ) ) {
 				lazy.instance = newInstance( lazy );
 				if ( lazy.isDebug() ) {
 					FLog.leaveBreadCrumb( "obtainInstance other/ActivitySingleton/AppSingleton new instance returned instance for lazy - %s", lazy );
@@ -477,7 +476,7 @@ public abstract class FuelModule {
 			if ( lazy.isDebug() ) {
 				FLog.leaveBreadCrumb( "obtainInstance Exception %s", e.getMessage() );
 			}
-			throw new FuelInjectionException( e );
+			FuelInjector.doFailure( lazy, new FuelUnableToObtainInstanceException( e ) );
 		}
 		if ( lazy.isDebug() ) {
 			FLog.leaveBreadCrumb( "obtainInstance fell through to return null" );
@@ -526,7 +525,7 @@ public abstract class FuelModule {
 				Class toType = getType( type, CacheKey.DEFAULT_FLAVOR ); // FIXME: FUEL args should support flavors
 
 				CacheKey key = CacheKey.attain( toType );
-				Object o = FuelInjector.getInstance( context, key, lazy.isDebug() );
+				Object o = FuelInjector.getInstance( context, key, lazy, lazy.isDebug() );
 				if ( o == null ) {
 					// here we say false because we dont want to allow non mapped or non singletons to be instantiated for constructor args.
 					// If a constructor takes an Integer as an argument, do you think its expecting a new Integer() ? probably not
@@ -576,12 +575,16 @@ public abstract class FuelModule {
 		throw new FuelInjectionException( "Unable to instantiate %s", lazy );
 	}
 
-	private Object initializeNewInstance( Lazy lazy ) throws Exception {
+	/**
+	 * @param lazy must have an instance
+	 * @return
+	 * @throws Exception
+	 */
+	Object initializeNewInstance( Lazy lazy ) throws Exception {
 		if ( lazy.isDebug() ) {
 			FLog.leaveBreadCrumb( "initializeNewInstance for %s", lazy );
 		}
-		FuelInjector.doPostProcess( lazy, lazy.getContext() );
-		doAnnotationProcessing( lazy.instance );
+		FuelInjector.doPostProcess( lazy );
 
 		if ( FuelInjector.isSingleton( lazy.leafType ) ) { // TODO: could totally cache lazy.isSingleton ... later.
 			onObtainNewSingleton( lazy.instance );
@@ -589,57 +592,20 @@ public abstract class FuelModule {
 		return lazy.instance;
 	}
 
-	Object doAnnotationProcessing( Object o ) throws Exception {
-		return doAnnotLazyInject( o );
-	}
-
 	/**
-	 * @param o, no nulls
+	 * Find the leaf-most type in the mapping rules for the given baseType<br>
+	 * bind: A -> B<br>
+	 * bind: B -> C<br>
+	 * bind: C -> D<br>
+	 * <br>
+	 * D = getType( A )<br>
+	 *
+	 * @param baseType
+	 * @param flavor - considered for providers
+	 * @param <T>
 	 * @return
-	 * @throws Exception
 	 */
-	private Object doAnnotLazyInject( Object o ) throws Exception {
-		if ( o == null ) {
-			throw new NullPointerException( "Tried to do Annotation Processing on a null instance" );
-		}
-		try {
-			// FIXME: pre-compile a list of methods with annotations and use that list instead of dynamically finding them
-			Method method = o.getClass().getDeclaredMethod( "fuelInit", (Class[]) null );
-			method.setAccessible( true );
-			if ( method.isAnnotationPresent( LazyInject.class ) ) {
-				method.invoke( o, (Object[]) null );
-			}
-		} catch ( InvocationTargetException ite ) {
-			FLog.w( "Cannot invoke fuelInit for %s", o );
-		} catch ( SecurityException e ) {
-			FLog.e( e, "Cannot invoke fuelInit -- security exception for %s", o );
-		} catch ( NoSuchMethodException e ) {
-			// Squelch
-		} catch ( IllegalArgumentException e ) {
-			FLog.e( e, "Cannot invoke fuelInit -- illegal argument for %s", o );
-		} catch ( IllegalAccessException e ) {
-			FLog.e( e, "Cannot invoke fuelInit -- illegal access for %s", o );
-		}
-		return o;
-	}
-
-	// TODO: cache chains ? maybe cache already excludes non @FuelMethods to improve doAnnotLazyInject ?
-	// private HashMap<Class<?>, List<Class<?>>> classChains = new HashMap<Class<?>, List<Class<?>>>();
-
-	private List<Class<?>> getClassChain( Class<?> clazz ) {
-		List<Class<?>> chain = new ArrayList<Class<?>>();
-		chain.add( clazz );
-		Class<?> tmp = clazz;
-		while ( ( tmp = tmp.getSuperclass() ) != null ) {
-			chain.add( tmp );
-		}
-		Collections.reverse( chain );
-		return chain;
-	}
-
-
-	<T> Class<? extends T> getType( Class<T> baseType,
-			Integer flavor ) { // Must stay logically paired with obtainInstance -- not super cool but ... for now.
+	<T> Class<? extends T> getType( Class<T> baseType, Integer flavor ) { // Must stay logically paired with obtainInstance -- not super cool but ... for now.
 		Object obj = classToObjectMap.get( baseType );
 		if ( obj != null ) {
 			return (Class<? extends T>) obj.getClass();
