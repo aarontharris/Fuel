@@ -128,6 +128,10 @@ public class Lazy<T> {
 		Lazy lazyParent = null;
 
 		try {
+			if ( FuelInjector.isDebug() ) {
+				FLog.leaveBreadCrumb( "initialize lazy %s, %s", lazy, parent );
+			}
+
 			if ( FuelInjector.isInitialized() ) {
 				// Hopefully this parent has been ignited already and we'll have a Lazy to show for it
 				lazyParent = FuelInjector.findLazyByInstance( parent );
@@ -316,6 +320,9 @@ public class Lazy<T> {
 	 * May return null and will never throw an exception, however the FuelModule.OnLazyGetFailed will be called.
 	 */
 	@NonNull public T get() throws FuelInjectionException {
+		if ( FuelInjector.isDebug() ) {
+			FLog.leaveBreadCrumb( "Lazy.get() %s", this );
+		}
 		T out = getChecked();
 		return out;
 	}
