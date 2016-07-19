@@ -47,6 +47,15 @@ public final class FuelInjector {
 	private static final WeakHashMap<Object, Queue<Lazy>> preprocessQueue = new WeakHashMap<>(); // LazyParent -> Queue<LazyChildren>
 	private static final SparseIntArray typeCache = new SparseIntArray();
 	private static final SparseArrayCompat<Class> leafTypeCache = new SparseArrayCompat<>();
+	private static final SparseIntArray isAppSingletonCache = new SparseIntArray();
+	private static final SparseIntArray isActSingletonCache = new SparseIntArray();
+	private static final SparseIntArray isFragSingletonCache = new SparseIntArray();
+	private static final SparseIntArray isSingletonCache = new SparseIntArray();
+	private static final SparseIntArray isAppCache = new SparseIntArray();
+	private static final SparseIntArray isActCache = new SparseIntArray();
+	private static final SparseIntArray isFragCache = new SparseIntArray();
+	private static final SparseIntArray isServCache = new SparseIntArray();
+	private static final SparseIntArray isContextCache = new SparseIntArray();
 
 	/**
 	 * True will tighten up tolerances for quicker failures and more verbosity
@@ -149,28 +158,93 @@ public final class FuelInjector {
 	}
 
 	static final boolean isAppSingleton( Class<?> leafType ) {
-		return isType( leafType, TYPE_APP_SINGLETON );
+		int hashCode = leafType.hashCode();
+		int singleton = isAppSingletonCache.get( hashCode );
+		if ( singleton == TYPE_UNDEF ) {
+			singleton = leafType.isAnnotationPresent( AppSingleton.class ) ? 1 : -1;
+			isAppSingletonCache.put( hashCode, singleton );
+		}
+		return singleton == 1;
 	}
 
 	static final boolean isActivitySingleton( Class<?> leafType ) {
-		return isType( leafType, TYPE_ACTIVITY_SINGLETON );
+		int hashCode = leafType.hashCode();
+		int singleton = isActSingletonCache.get( hashCode );
+		if ( singleton == TYPE_UNDEF ) {
+			singleton = leafType.isAnnotationPresent( ActivitySingleton.class ) ? 1 : -1;
+			isActSingletonCache.put( hashCode, singleton );
+		}
+		return singleton == 1;
 	}
 
 	static final boolean isFragmentSingleton( Class<?> leafType ) {
-		return isType( leafType, TYPE_FRAG_SINGLETON );
+		int hashCode = leafType.hashCode();
+		int singleton = isFragSingletonCache.get( hashCode );
+		if ( singleton == TYPE_UNDEF ) {
+			singleton = leafType.isAnnotationPresent( FragmentSingleton.class ) ? 1 : -1;
+			isFragSingletonCache.put( hashCode, singleton );
+		}
+		return singleton == 1;
 	}
 
 	static final boolean isSingleton( Class<?> leafType ) {
-		return isType( leafType, TYPE_SINGLETON );
+		int hashCode = leafType.hashCode();
+		int singleton = isSingletonCache.get( hashCode );
+		if ( singleton == TYPE_UNDEF ) {
+			singleton = ( isAppSingleton( leafType ) || isActivitySingleton( leafType ) || isFragmentSingleton( leafType ) ) ? 1 : -1;
+			isSingletonCache.put( hashCode, singleton );
+		}
+		return singleton == 1;
 	}
 
-	static final boolean isType( Class<?> leafType, int theType ) {
-		int type = typeCache.get( leafType.hashCode() );
-		if ( type == TYPE_UNDEF ) {
-			type = leafType.isAnnotationPresent( FragmentSingleton.class ) ? theType : TYPE_OBJECT;
-			typeCache.put( leafType.hashCode(), type );
+	static boolean isApplication( Class<?> leafType ) {
+		int hashCode = leafType.hashCode();
+		int singleton = isAppCache.get( hashCode );
+		if ( singleton == TYPE_UNDEF ) {
+			singleton = Application.class.isAssignableFrom( leafType ) ? 1 : -1;
+			isAppCache.put( hashCode, singleton );
 		}
-		return type == theType;
+		return singleton == 1;
+	}
+
+	static boolean isActivity( Class<?> leafType ) {
+		int hashCode = leafType.hashCode();
+		int singleton = isActCache.get( hashCode );
+		if ( singleton == TYPE_UNDEF ) {
+			singleton = Activity.class.isAssignableFrom( leafType ) ? 1 : -1;
+			isActCache.put( hashCode, singleton );
+		}
+		return singleton == 1;
+	}
+
+	static boolean isFragment( Class<?> leafType ) {
+		int hashCode = leafType.hashCode();
+		int singleton = isFragCache.get( hashCode );
+		if ( singleton == TYPE_UNDEF ) {
+			singleton = ( android.app.Fragment.class.isAssignableFrom( leafType ) || android.support.v4.app.Fragment.class.isAssignableFrom( leafType ) ) ? 1 : -1;
+			isFragCache.put( hashCode, singleton );
+		}
+		return singleton == 1;
+	}
+
+	static boolean isService( Class<?> leafType ) {
+		int hashCode = leafType.hashCode();
+		int singleton = isServCache.get( hashCode );
+		if ( singleton == TYPE_UNDEF ) {
+			singleton = Service.class.isAssignableFrom( leafType ) ? 1 : -1;
+			isServCache.put( hashCode, singleton );
+		}
+		return singleton == 1;
+	}
+
+	static boolean isContext( Class<?> leafType ) {
+		int hashCode = leafType.hashCode();
+		int singleton = isContextCache.get( hashCode );
+		if ( singleton == TYPE_UNDEF ) {
+			singleton = Context.class.isAssignableFrom( leafType ) ? 1 : -1;
+			isContextCache.put( hashCode, singleton );
+		}
+		return singleton == 1;
 	}
 
 	static final Lazy findLazyByInstance( Object instance ) {
@@ -203,6 +277,10 @@ public final class FuelInjector {
 				}
 			}
 
+			if ( isDebug() ) {
+				FLog.leaveBreadCrumb( "ignite %s w/ %s", instance, context );
+			}
+
 			// skip wrappers
 			context = toContext( context );
 
@@ -214,15 +292,17 @@ public final class FuelInjector {
 				parent = Lazy.newEmptyParent( instance );
 			}
 
+			if ( !Lazy.isPreProcessed( parent ) ) {
+				doPreProcessParent( parent, context );
+			}
+
 			// In the case of a service, we need to plug it into the cache after it calls ignite because we cant construct it
 			if ( isService( instance.getClass() ) ) {
 				CacheKey key = CacheKey.attain( instance.getClass() );
 				injector.putObjectByContextType( parent, key, instance );
-			} else {
-				if ( !Lazy.isPreProcessed( parent ) ) {
-					doPreProcessParent( parent, context );
-				}
-
+			}
+			// Don't try to instantiate services
+			else {
 				if ( !Lazy.isPostProcessed( parent ) ) {
 					getFuelModule().initializeNewInstance( parent );
 				}
@@ -321,6 +401,9 @@ public final class FuelInjector {
 	}
 
 	static void doPreProcessParent( Lazy parent, Context context ) {
+		if ( FuelInjector.isDebug() ) {
+			FLog.leaveBreadCrumb( "pre-process parent %s, %s", parent, context );
+		}
 		doPreProcessCommon( parent, context );
 		Scope contextScope = determineScope( parent.getContext().getClass() );
 		parent.scope = determineScope( parent.leafType );
@@ -353,6 +436,9 @@ public final class FuelInjector {
 	 * @param parent - must be postProcessed and have instance/context
 	 */
 	static void doPreProcessChild( Lazy child, Lazy parent ) throws FuelUnableToObtainContextException, FuelScopeViolationException {
+		if ( FuelInjector.isDebug() ) {
+			FLog.leaveBreadCrumb( "pre-process child %s, %s", child, parent );
+		}
 		Context context = parent.getContext();
 
 		doPreProcessCommon( child, context );
@@ -413,6 +499,9 @@ public final class FuelInjector {
 	 * @param lazy must have an instance
 	 */
 	static void doPostProcess( Lazy lazy ) throws FuelUnableToObtainContextException, FuelScopeViolationException {
+		if ( FuelInjector.isDebug() ) {
+			FLog.leaveBreadCrumb( "post-process %s", lazy );
+		}
 		rememberLazyByInstance( lazy.getInstance(), lazy );
 		lazy.postProcessed = true; // before processing queue bcuz this lazy is done and its children should consider it done
 		dequeuePreProcesses( lazy );
@@ -512,31 +601,6 @@ public final class FuelInjector {
 	 */
 	@Nullable public static final <T> T findInstance( Context context, Class<T> type, Integer flavor ) {
 		return getInstance( context, CacheKey.attain( type, flavor ), null, false );
-	}
-
-	static boolean isApplication( Class<?> leafType ) {
-		return Application.class.isAssignableFrom( leafType );
-	}
-
-	static boolean isActivity( Class<?> leafType ) {
-		return Activity.class.isAssignableFrom( leafType );
-	}
-
-	static boolean isFragment( Class<?> leafType ) {
-		if ( android.app.Fragment.class.isAssignableFrom( leafType ) ) {
-			return true;
-		} else if ( android.support.v4.app.Fragment.class.isAssignableFrom( leafType ) ) {
-			return true;
-		}
-		return false;
-	}
-
-	static boolean isService( Class<?> leafType ) {
-		return Service.class.isAssignableFrom( leafType );
-	}
-
-	static boolean isContext( Class<?> leafType ) {
-		return Context.class.isAssignableFrom( leafType );
 	}
 
 	static final <T> T getInstance( Context context, CacheKey key, @Nullable Lazy lazy, boolean debug ) {
@@ -696,7 +760,6 @@ public final class FuelInjector {
 	}
 
 	static final <T> T attainInstance( CacheKey key, Lazy<T> lazy, boolean allowAnonymousNewInstance ) throws FuelInjectionException {
-
 		try {
 			if ( lazy.isDebug() ) {
 				FLog.leaveBreadCrumb( "attainInstance for key: %s and lazy: %s", key, lazy );
