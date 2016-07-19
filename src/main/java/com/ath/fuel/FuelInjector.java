@@ -10,6 +10,8 @@ import android.content.Intent;
 import android.os.Bundle;
 import android.support.annotation.MainThread;
 import android.support.annotation.Nullable;
+import android.support.v4.util.SparseArrayCompat;
+import android.util.SparseIntArray;
 import android.view.View;
 
 import com.ath.fuel.err.FuelInjectionException;
@@ -17,9 +19,7 @@ import com.ath.fuel.err.FuelInvalidParentException;
 import com.ath.fuel.err.FuelScopeViolationException;
 import com.ath.fuel.err.FuelUnableToObtainContextException;
 
-import java.lang.annotation.Annotation;
 import java.lang.ref.WeakReference;
-import java.lang.reflect.Method;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.Comparator;
@@ -45,8 +45,8 @@ public final class FuelInjector {
 	private static final ReentrantReadWriteLock cacheLock = new ReentrantReadWriteLock();
 	private static final WeakHashMap<Object, Lazy> lazyCache = new WeakHashMap<>(); // parent -> LazyParent
 	private static final WeakHashMap<Object, Queue<Lazy>> preprocessQueue = new WeakHashMap<>(); // LazyParent -> Queue<LazyChildren>
-
-	// private static WeakHashMap<Object, WeakReference<Context>> objectToContext = new WeakHashMap<>();
+	private static final SparseIntArray typeCache = new SparseIntArray();
+	private static final SparseArrayCompat<Class> leafTypeCache = new SparseArrayCompat<>();
 
 	/**
 	 * True will tighten up tolerances for quicker failures and more verbosity
@@ -128,33 +128,57 @@ public final class FuelInjector {
 		return !isInitialized();
 	}
 
-	static <T> Class<? extends T> toLeafType( Class<T> type, Integer flavor ) {
+
+	static final int TYPE_UNDEF = 0;
+	static final int TYPE_OBJECT = 1;
+	static final int TYPE_SINGLETON = 2;
+	static final int TYPE_APP_SINGLETON = 3;
+	static final int TYPE_ACTIVITY_SINGLETON = 4;
+	static final int TYPE_FRAG_SINGLETON = 5;
+
+	static final <T> Class<? extends T> toLeafType( Class<T> type, Integer flavor ) {
+		if ( flavor == null ) {
+			Class leafType = leafTypeCache.get( type.hashCode() );
+			if ( leafType == null ) {
+				leafType = injector.fuelModule.getType( type, null );
+				leafTypeCache.put( type.hashCode(), leafType );
+			}
+			return leafType;
+		}
 		return injector.fuelModule.getType( type, flavor );
 	}
 
-	static boolean isAppSingleton( Class<?> leafType ) {
-		return leafType.isAnnotationPresent( AppSingleton.class );
+	static final boolean isAppSingleton( Class<?> leafType ) {
+		return isType( leafType, TYPE_APP_SINGLETON );
 	}
 
-	static boolean isActivitySingleton( Class<?> leafType ) {
-		return leafType.isAnnotationPresent( ActivitySingleton.class );
+	static final boolean isActivitySingleton( Class<?> leafType ) {
+		return isType( leafType, TYPE_ACTIVITY_SINGLETON );
 	}
 
-	static boolean isFragmentSingleton( Class<?> leafType ) {
-		return leafType.isAnnotationPresent( FragmentSingleton.class );
+	static final boolean isFragmentSingleton( Class<?> leafType ) {
+		return isType( leafType, TYPE_FRAG_SINGLETON );
 	}
 
-	static boolean isSingleton( Class<?> leafType ) {
-		return isAppSingleton( leafType ) || isActivitySingleton( leafType ) || isFragmentSingleton( leafType );
+	static final boolean isSingleton( Class<?> leafType ) {
+		return isType( leafType, TYPE_SINGLETON );
 	}
 
+	static final boolean isType( Class<?> leafType, int theType ) {
+		int type = typeCache.get( leafType.hashCode() );
+		if ( type == TYPE_UNDEF ) {
+			type = leafType.isAnnotationPresent( FragmentSingleton.class ) ? theType : TYPE_OBJECT;
+			typeCache.put( leafType.hashCode(), type );
+		}
+		return type == theType;
+	}
 
-	static Lazy findLazyByInstance( Object instance ) {
+	static final Lazy findLazyByInstance( Object instance ) {
 		return lazyCache.get( instance );
 	}
 
 
-	static void rememberLazyByInstance( Object instance, Lazy lazy ) {
+	static final void rememberLazyByInstance( Object instance, Lazy lazy ) {
 		lazyCache.put( instance, lazy );
 	}
 
@@ -166,7 +190,7 @@ public final class FuelInjector {
 	 * You may skip {@link #ignite(Context, Object)} when a the object has is mapped to a context via {@link FuelModule#provideContext(Object)}<br>
 	 * One exception to this rule is that injections are always queued up until Fuel has been initialized.<br>
 	 */
-	public static void ignite( Context context, Object instance ) {
+	public static final void ignite( Context context, Object instance ) {
 		try {
 			if ( instance == null ) {
 				return;
@@ -462,32 +486,6 @@ public final class FuelInjector {
 		ignite( app, app );
 	}
 
-	// TODO: remove?
-	private static final void executeFirstMethodMatchingThisAnnotation( Collection<Object> objects, Class<? extends Annotation> annotation ) {
-		FLog.d( "onFuel: executeFirstMethod begin" );
-		for ( Object o : objects ) {
-			try {
-				Method method = null;
-				for ( Method m : o.getClass().getDeclaredMethods() ) {
-					if ( m.isAnnotationPresent( annotation ) ) {
-						method = m;
-						break;
-					}
-				}
-
-				if ( method != null ) {
-					if ( o != null ) {
-						method.setAccessible( true );
-						method.invoke( o, (Object[]) null );
-					}
-				}
-			} catch ( Exception e ) {
-				FLog.e( e );
-			}
-		}
-		FLog.d( "onFuel: executeFirstMethod end" );
-	}
-
 	static final <T> T attain( Context context, Class<T> type ) {
 		return attain( context, type, CacheKey.DEFAULT_FLAVOR );
 	}
@@ -582,8 +580,7 @@ public final class FuelInjector {
 		} else if ( isService( key.getLeafType() ) ) {
 			final T serviceInstance = getServiceInstance( lazy, key, true );
 			if ( debug ) {
-				FLog.leaveBreadCrumb( "getInstance for Service got %s",
-						serviceInstance == null ? "null" : serviceInstance.getClass().getSimpleName() );
+				FLog.leaveBreadCrumb( "getInstance for Service got %s", serviceInstance == null ? "null" : serviceInstance.getClass().getSimpleName() );
 			}
 			return serviceInstance;
 		} else if ( isContext( key.getLeafType() ) ) {
@@ -595,8 +592,7 @@ public final class FuelInjector {
 
 		final T objectByContextType = (T) injector.getObjectByContextType( lazy, key );
 		if ( debug ) {
-			FLog.leaveBreadCrumb( "getInstance getObjectByContextType got %s", objectByContextType == null ? "null" : objectByContextType.getClass()
-					.getSimpleName() );
+			FLog.leaveBreadCrumb( "getInstance getObjectByContextType got %s", objectByContextType == null ? "null" : objectByContextType.getClass().getSimpleName() );
 		}
 
 		return objectByContextType;
