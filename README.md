@@ -67,3 +67,58 @@ An ActivitySingleton is exactly like an AppSingleton, however, instead of one in
 
 ### FragmentSingleton aka Fragment Scoped Singleton
 A FragmentSingleton is exactly like an ActivitySingleton, however, instead of one instance for the entire life of the activity, each Fragment will receive a unique instance, but only one instance per fragment.  All objects aware of the Fragment can inject FragmentSingletons and ActivitySingletons and AppSingletons.
+
+# Scope and Scope Awareness
+Fuel is aware of the scope of all objects based on the context they've been associated with, either directly or indirectly.
+
+## Self asssociation to a context:
+```
+public class MyRandomClass {
+  private final Lazy<SomeActivitySingleton> mSomeActivitySingleton = Lazy.attain( this, SomeActivitySingleton.class );
+  
+  public MyRandomClass( Activity activity ) {
+    FuelInjector.ignite( activity, this ); // NOTE: associate context to self
+  }
+}
+```
+
+## Direct association to a context;
+```
+public class SomePojo {
+  private final Lazy<SomeActivitySingleton> mSomeActivitySingleton = Lazy.attain( this, SomeActivitySingleton.class );
+  ...
+}
+
+public class MyRandomClass {
+  private final Lazy<SomeActivitySingleton> mSomeActivitySingleton = Lazy.attain( this, SomeActivitySingleton.class );
+  
+  public MyRandomClass( Activity activity ) {
+    FuelInjector.ignite( activity, this );
+    
+    SomePojo pojo = new SomePojo();
+    FuelInjector.ignite( this, pojo ); // NOTE: associate self to pojo and pojo inherits context from self
+  }
+}
+```
+
+## Inherited association to a context
+Please reference the inline comment below prefixed "NOTE:" -- When doing a Lazy.attain(), the first argument is either a context, or an instance that should be aware of a context so that the injectable can get the context or inherit the context respectively.  A keen eye may notice that at the time that Lazy.attain() has been called, "this" does not yet have a context associated with it since it's FuelInjector.ignite( activity, this ) has not yet been called.  This is okay because injections are queued up until ignite is called and then dequeued.  It works out nicely.
+
+mSomeActivitySingleton inherits the context given to MyRandomClass in its constructor, and it is this context that scopes both the MyRandomClass instance and mSomeActivitySingleton.
+```
+public class SomePojo {
+  private final Lazy<SomeActivitySingleton> mSomeActivitySingleton = Lazy.attain( this, SomeActivitySingleton.class );
+  ...
+}
+
+public class MyRandomClass {
+  private final Lazy<SomeActivitySingleton> mSomeActivitySingleton = Lazy.attain( this, SomeActivitySingleton.class ); // NOTE: associate self to injectable
+  
+  public MyRandomClass( Activity activity ) {
+    FuelInjector.ignite( activity, this );
+  }
+}
+```
+
+### App Scope
+Singletons, AppSingletons can inject the Application, Singletons, and AppSingletons becaue they are similary scoped -- one per lifecycle of the app.  POJOs are not one per lifecycle of the app, but the can still inject S
