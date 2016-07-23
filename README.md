@@ -63,10 +63,10 @@ public class SampleFuelModule extends FuelModule {
 ```
 
 ### ActivitySingleton aka Activity Scoped Singleton
-An ActivitySingleton is exactly like an AppSingleton, however, instead of one instance for the entire life of the application, each Activity will receive a unique instance, but only one instance per activity.  All objects aware of the Activity can inject ActivitySingletons and AppSingletons.
+An ActivitySingleton is exactly like an AppSingleton, however, instead of one instance for the entire life of the application, each Activity will receive a unique instance, but only one instance per activity.  All objects aware of the Activity can inject the Activity, ActivitySingletons and AppSingletons.
 
 ### FragmentSingleton aka Fragment Scoped Singleton
-A FragmentSingleton is exactly like an ActivitySingleton, however, instead of one instance for the entire life of the activity, each Fragment will receive a unique instance, but only one instance per fragment.  All objects aware of the Fragment can inject FragmentSingletons and ActivitySingletons and AppSingletons.
+A FragmentSingleton is exactly like an ActivitySingleton, however, instead of one instance for the entire life of the activity, each Fragment will receive a unique instance, but only one instance per fragment.  All objects aware of the Fragment can inject the Fragment, FragmentSingletons and ActivitySingletons and AppSingletons.
 
 # Scope
 Fuel is aware of the scope of all objects based on the context they've been associated with, either directly or inherited (more on that later).
