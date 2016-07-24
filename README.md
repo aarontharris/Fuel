@@ -69,11 +69,11 @@ An ActivitySingleton is exactly like an AppSingleton, however, instead of one in
 A FragmentSingleton is exactly like an ActivitySingleton, however, instead of one instance for the entire life of the activity, each Fragment will receive a unique instance, but only one instance per fragment.  All objects aware of the Fragment can inject the Fragment, FragmentSingletons and ActivitySingletons and AppSingletons.
 
 # Scope
-Fuel is aware of the scope of all objects based on the context they've been associated with, either directly or inherited (more on that later).
+Fuel is aware of the scope of all objects based on the context (or Fragment) they've been associated with, either directly or inherited (more on that later).
 Proper scoping is guaranteed when using @AppSingleton, @ActivitySingleton, @FragmentSingleton, however when dealing with POJOs that do injections of their own, it is on you to make sure the POJO class receives the correct context for its needs.  Runtime failures will occur at injection time to help you identify early on that there was a scope failure.
 
 ## App Scope
-Singletons and AppSingletons can inject the Application, Singletons, and AppSingletons becaue they are similary scoped -- one per lifecycle of the app.  POJOs are not one per lifecycle of the app, but they can still inject from App Scope because Fuel is always aware of the Application context and will conveniently associate for you -- only in the case of App Scope, this is not done for any other scope since Fuel cannot confidently know which Activity or Fragment is the correct one since there are many.
+Singletons and AppSingletons can inject the Application, Singletons, and AppSingletons becaue they are similary scoped -- one per lifecycle of the app.  POJOs are not one per lifecycle of the app, but they can still inject from App Scope because Fuel is always aware of the Application context and will conveniently associate for you -- only in the case of App Scope -- this is not done for any other scope since Fuel cannot confidently know which Activity or Fragment is the correct one since there are many.
 
 ## Activity Scope
 ActivitySingletons or POJOs that are associated with an Activity context may inject all App Scoped plus the Activity, ActivitySingletons, or POJOs that require injection and Activity awareness.
@@ -82,11 +82,10 @@ ActivitySingletons or POJOs that are associated with an Activity context may inj
 FragmentSingletons or  POJOs that are associated with a Fragment may inject all Activity Scoped plus the Fragment, FragmentSingletons and POJOs that require injections and Fragment awareness.  It is important to note that a Fragment is not a context but association (described below) works the same.
 
 ## POJOs and Scope
-There is no POJO scope but still worth mentioning here.  As mentioned in App Scope, POJOs can inject App Scoped injectables, but POJOs are not scoped.
-// FIXME: needs more
+There is no POJO scope but still worth mentioning here.  As mentioned in App Scope, POJOs can inject App Scoped injectables, but POJOs are not scoped.  By default, Injecting a POJO will construct a new instance once for each injection.  However, you may bind a type to a POJO instance essentially telling Fuel to always inject that instance and therefore treating it as a singleton.  You may also use a Provider to choose at injection time, how to obtain an instance (more on this later).
 
 # Context Association and Scope Awareness
-It is important to note that the examples below demonstrate an Activity context, but the same goes for Application.  However with application association, you receive the Application scope and may only inject AppScoped injectables.
+It is important to note that the examples below demonstrate an Activity context, but the same goes for Application.
 
 ## Self asssociation to a context:
 The simplest form of associating a context to an instance.  MyRandomClass knows about the activity and associates itself to the activity.  This example is self-enforcing and self-documenting, however you may not always want to give the class the context.
