@@ -24,6 +24,13 @@ git submodule add -b release_1.0.0 git@github.com:aarontharris/Fuel.git Fuel
 # How it works
 I'm going to assume you watched the video above, if not, do that now, I'll wait...
 
+### Fuel Flow
+* You name your injections at the top of your class.
+* If the class instance itself was injected, the injections are available immediately
+* If the class instance itself was not injected, the injections are queued up waiting for ignite.
+* The class gets ignited and injections become available but injection instances are not constructed yet, only Lazy<T>.
+* lazy.get() is called and the instance is obtained from a scoped cache or constructed new.
+
 All injections obey type-mappings as you've configured them in your FuelModule -- more on this later.
 
 You can inject anything with Fuel, Singletons, AppSingletons, ActivitySingletons, FragmentSingletons, POJOs, or anything you can teach Fuel to construct, and it's easy.
