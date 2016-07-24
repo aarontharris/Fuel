@@ -15,6 +15,12 @@ git submodule add -b release_1.0.0 git@github.com:aarontharris/Fuel.git Fuel
 # Quick Integration Tutorial
 [Youtube Fuel Tutorial](https://www.youtube.com/watch?v=CuWsEsSgPso)
 
+# Integration Overview
+* Inside your Application.onCreate(), be sure to call FuelInjector.initializeModule() with your Custom FuelModule.
+* If an object needs to perform injections and itself was not injected, FuelInjector.ignite().
+  * Injections are not available until after FuelInjector.ignite().
+* All injections are lazy
+
 # How it works
 I'm going to assume you watched the video above, if not, do that now, I'll wait...
 
@@ -188,11 +194,14 @@ public class MyClass {
 ```
 
 ### Providers
-Providers give you the opportunity to evaluate the injection situation.  A Provider is an abstract class with a provide method that gets called once per injection per type.
+Providers give you the opportunity to evaluate the injection situation.  A Provider is an abstract class with a provide method that gets called once per injection per type.  If the type is an AppSingleton, then the provider is only called once ever.  If type is an ActivitySingleton, the provider is called only once per Activity, Fragment, etc.  For POJOs the provider is called once per POJO.
 
 #### Choose the right constructor with a Provider
-This example will return a new instance of MyClass using the correct constructor of MyClass( SomeThing ) by using a Provider to first obtain SomeThing.
-// FIXME: what if MyClass is an @AppSingleton ? the provider returns new?  Best to test this.
+This example will return a new instance of MyClass using the correct constructor of MyClass( SomeThing ) by using a Provider to first obtain SomeThing.  Note that as hinted above, even though we call **new** MyClass( someThing ), if MyClass were a singleton, we'd still only have one instance because the provider would not get called again until the singleton goes out of scope.
+
+As you can see in the example below, the power of providers comes from their ability to inject things and evaluate before returning an instance.  This allows you to place all factory wiring inside your FuelModule.
+
+A note to best practices, when injecting inside a provider, its best to use the parent object as the parent for related injections so not to break scope.
 ```
 public class MyClass {
   public MyClass() {
