@@ -142,4 +142,73 @@ public class MyRandomClass {
 }
 ```
 
+# Type Mapping and Construction
+You may bind a base-type to a leaf-type in the FuelModule to teach Fuel what type to provide when a type is requested.  An example we've seen above; when injecting type "Box" and Box was mapped to OrangeBox.  Box is the base-type and OrangeBox is the leaf-type, the base-type maps to the leaf-type.  You may chain type maps as long as you like, but the terminating type must be something Fuel can construct.
 
+### Type Maps
+Mapping a base-type to a leaf-type is performed using the bind(base, leaf) method within FuelModule.configure().
+```
+public class SampleFuelModule extends FuelModule {
+  protected void configure() {
+    super.configure();
+    
+    bind( Base.class, Leaf.class ); // Leaf must be derived from Base.
+    
+    bind( A.class, B.class );
+    bind( B.class, C.class );
+    bind( C.class, D.class ); // you main chain types if needed, injecting A will result in D.
+  }
+}
+```
+
+### Construction
+Fuel can only construct objects that have one of the following
+* A Public Empty Constructor
+* A Public Constructor with arguments that Fuel is capable of constructing
+  * Each argument must also meet the construction requirements, and so must their constructor arguments if any, and so on recursively.
+
+To avoid confusion, precedence will always be given to empty constructors if available.  If you find yourself with an Class in need of multiple constructors and you want Fuel to choose the correct constructor, consider a Provider.
+
+#### Which Constructor?
+```
+public class MyClass {
+  public MyClass() { // Takes precedence, even if Fuel knows how to obtain SomeThing.
+  }
+  
+  public MyClass( SomeThing arg ) {
+    ...
+  }
+}
+```
+
+### Providers
+Providers give you the opportunity to evaluate the injection situation.  A Provider is an abstract class with a provide method that gets called once per injection per type.
+
+#### Choose the right constructor with a Provider
+This example will return a new instance of MyClass using the correct constructor of MyClass( SomeThing ) by using a Provider to first obtain SomeThing.
+// FIXME: what if MyClass is an @AppSingleton ? the provider returns new?  Best to test this.
+```
+public class MyClass {
+  public MyClass() {
+  }
+  
+  public MyClass( SomeThing arg ) { // Fuel is aware of SomeThing
+    ...
+  }
+}
+
+public class SampleFuelModule extends FuelModule {
+  protected void configure() {
+    super.configure();
+    
+    bind( SomeThing.class, new SomeThing() );
+    
+    bind( MyClass.class, new FuelProvider<MyClass>() {
+      @Override public MyClass provide( Lazy lazy, Object parent ) {
+        Lazy<SomeThing> someThing = Lazy.attain( parent, SomeThing.class );
+        return new MyClass( someThing );
+      }
+    });
+  }
+}
+```
