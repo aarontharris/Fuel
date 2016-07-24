@@ -15,6 +15,8 @@ git submodule add -b release_1.0.0 git@github.com:aarontharris/Fuel.git Fuel
 # Quick Integration Tutorial
 [Youtube Fuel Tutorial](https://www.youtube.com/watch?v=CuWsEsSgPso)
 
+[Youtube Fuel Overview](https://www.youtube.com/watch?v=306GrCktydw)
+
 # Integration Overview
 * Inside your Application.onCreate(), be sure to call FuelInjector.initializeModule() with your Custom FuelModule.
 * If an object needs to perform injections and itself was not injected, FuelInjector.ignite().
@@ -234,3 +236,4 @@ public class SampleFuelModule extends FuelModule {
   }
 }
 ```
+![](https://github.com/aarontharris/Fuel/blob/master/Fuel%20Flow.png)
