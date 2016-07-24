@@ -236,3 +236,4 @@ public class SampleFuelModule extends FuelModule {
   }
 }
 ```
+![](https://github.com/aarontharris/Fuel/blob/master/Fuel%20Flow.png)
