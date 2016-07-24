@@ -592,18 +592,18 @@ public final class FuelInjector {
 	/**
 	 * Does not attain, only returns an item that is already in the cache or null.
 	 */
-	@Nullable public static final <T> T findInstance( Context context, Class<T> type ) {
-		return getInstance( context, CacheKey.attain( type ), null, false );
+	@Nullable private static final <T> T findInstance( Context context, Class<T> type ) {
+		return getInstance( context, CacheKey.attain( type ), null, false ); // FIXME lazy cant be null
 	}
 
 	/**
 	 * Does not attain, only returns an item that is already in the cache or null.
 	 */
-	@Nullable public static final <T> T findInstance( Context context, Class<T> type, Integer flavor ) {
-		return getInstance( context, CacheKey.attain( type, flavor ), null, false );
+	@Nullable private static final <T> T findInstance( Context context, Class<T> type, Integer flavor ) {
+		return getInstance( context, CacheKey.attain( type, flavor ), null, false ); // FIXME lazy cant be null
 	}
 
-	static final <T> T getInstance( Context context, CacheKey key, @Nullable Lazy lazy, boolean debug ) {
+	static final <T> T getInstance( Context context, CacheKey key, Lazy lazy, boolean debug ) {
 		// if ( Application.class.isAssignableFrom( key.getLeafType() ) ) {
 		// return (T) getApp();
 		// } else if ( Activity.class.isAssignableFrom( key.getLeafType() ) ) {
