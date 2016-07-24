@@ -147,6 +147,12 @@ You may bind a base-type to a leaf-type in the FuelModule to teach Fuel what typ
 
 ### Type Maps
 Mapping a base-type to a leaf-type is performed using the bind(base, leaf) method within FuelModule.configure().
+
+You may bind a class to a instance.  (Highest precedence)
+
+You may bind a class to a provider.  (Next highest precedence)
+
+You may bind a class to a class. (Lowest precedence).
 ```
 public class SampleFuelModule extends FuelModule {
   protected void configure() {
