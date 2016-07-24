@@ -15,12 +15,12 @@ import android.view.View;
 import android.widget.AdapterView;
 import android.widget.ArrayAdapter;
 
+import com.ath.fuel.err.FuelInjectionBindException;
 import com.ath.fuel.err.FuelInjectionException;
 import com.ath.fuel.err.FuelUnableToObtainInstanceException;
 
 import java.lang.reflect.Constructor;
 import java.util.HashMap;
-import java.util.HashSet;
 
 public abstract class FuelModule {
 
@@ -39,44 +39,16 @@ public abstract class FuelModule {
 		 * Here, you may inject objects and inspect state and decide which instance is best.<br>
 		 * This method is called once for each Lazy.attain, but not for Lazy.get()'s as the lazy's internal instance is cached.<br>
 		 *
-		 * @param lazy
-		 * @param parent that attained the lazy.
+		 * @param lazy the actual lazy returned to the parent requesting injection - contains useful metadata
+		 * @param parent the object that requested injection and will receive the lazy.
 		 * @return
 		 */
 		public abstract T provide( Lazy lazy, Object parent );
-
-		/**
-		 * Guaranteed to be called at least once prior to provide()<br>
-		 * May be called many times per provide() so it should be quick.
-		 */
-		public abstract Class<T> getType( Class<?> baseType, Integer flavor );
 	}
 
-
-	/**
-	 * Like FuelProvider<T> except the getType method auto-returns the <T> type thus ignoring any kind of type mapping and making this simple
-	 */
-	public abstract static class FuelProviderSimple<T> extends FuelProvider<T> {
-		@Override
-		public abstract T provide( Lazy lazy, Object parent );
-
-		@Override
-		public Class<T> getType( Class<?> arg0, Integer arg1 ) {
-			return (Class<T>) arg0;
-		}
-	}
-
-	public abstract static class LazyProvider<T> {
-		public LazyProvider( Object parent ) {
-		}
-
-		public abstract T get( Context context );
-	}
-
-	private final HashMap<Class<?>, Class<?>> classToClassMap = new HashMap<Class<?>, Class<?>>();
-	private final HashMap<Class<?>, Object> classToObjectMap = new HashMap<Class<?>, Object>();
-	private final HashMap<Class<?>, FuelProvider> classToProviderMap = new HashMap<Class<?>, FuelModule.FuelProvider>();
-	private final HashSet<Class<?>> otherInjectables = new HashSet<Class<?>>();
+	private final HashMap<Class<?>, Class<?>> classToClassMap = new HashMap<>();
+	private final HashMap<Class<?>, Object> classToObjectMap = new HashMap<>();
+	private final HashMap<Class<?>, FuelProvider> classToProviderMap = new HashMap<>();
 	private Application app;
 
 	/* package private */
@@ -351,6 +323,17 @@ public abstract class FuelModule {
 	 * @param to
 	 */
 	protected void bind( Class<?> from, Class<?> to ) {
+		if ( FuelInjector.isDebug() ) {
+			if ( from == null ) {
+				throw new FuelInjectionBindException( "bind failure baseType cannot be null" );
+			}
+			if ( to == null ) {
+				throw new FuelInjectionBindException( "bind failure cannot bind %s to a null instance", from );
+			}
+			if ( !from.isAssignableFrom( to ) ) {
+				throw new FuelInjectionBindException( "bind failure %s is not derived from %s", to, from );
+			}
+		}
 		classToClassMap.put( from, to );
 	}
 
@@ -365,6 +348,17 @@ public abstract class FuelModule {
 	 * @see #bind(Class, Class)
 	 */
 	protected void bind( Class<?> from, Object to ) {
+		if ( FuelInjector.isDebug() ) {
+			if ( from == null ) {
+				throw new FuelInjectionBindException( "bind failure baseType cannot be null" );
+			}
+			if ( to == null ) {
+				throw new FuelInjectionBindException( "bind failure cannot bind %s to a null instance", from );
+			}
+			if ( !from.isAssignableFrom( to.getClass() ) ) {
+				throw new FuelInjectionBindException( "bind failure %s is not derived from %s", to.getClass(), from );
+			}
+		}
 		classToObjectMap.put( from, to );
 		classToObjectMap.put( to.getClass(), to );
 	}
@@ -380,18 +374,12 @@ public abstract class FuelModule {
 	 * @see #bind(Class, Class)
 	 */
 	protected void bind( Class<?> from, FuelProvider to ) {
+		if ( FuelInjector.isDebug() ) {
+			if ( from == null ) {
+				throw new FuelInjectionBindException( "bind failure baseType cannot be null" );
+			}
+		}
 		classToProviderMap.put( from, to );
-	}
-
-	/**
-	 * Tell Fuel that this class is injectable.
-	 * In other words, once instantiated, it will be placed in the singleton pool and future injections will return the same instance.
-	 * Essentially it turns it into a singleton even if it is not declared @AppSingleton<br>
-	 * <br>
-	 * Useful when the code is not yours but you want only one instance.
-	 */
-	protected void markAsInjectable( Class<?> clazz ) {
-		otherInjectables.add( clazz );
 	}
 
 	Application getApplication() {
@@ -433,16 +421,10 @@ public abstract class FuelModule {
 			// Second try provider map
 			FuelProvider<?> provider = classToProviderMap.get( leafType );
 			if ( provider != null ) {
-				// FIXME: FUEL - maybe we don't need this kneejerk reaction to the contract
-				// FIXME: FUEL - - I think FuelModule.getType( baseType ) is always called and it calls provider.getType()
-				provider.getType( lazy.type, lazy.getFlavor() ); // Obey contract that provider.getType() will always be called prior to provider.provide()
-
 				lazy.instance = provider.provide( lazy, lazy.getParent() );
-
 				if ( lazy.isDebug() ) {
 					FLog.leaveBreadCrumb( "obtainInstance provider provided instance for lazy - %s", lazy );
 				}
-
 				return initializeNewInstance( lazy );
 			}
 
@@ -613,13 +595,14 @@ public abstract class FuelModule {
 
 		FuelProvider<?> provider = classToProviderMap.get( baseType );
 		if ( provider != null ) {
-			return (Class<? extends T>) provider.getType( baseType, flavor );
+			return baseType;
 		}
 
 		Class<?> toType = classToClassMap.get( baseType );
 		if ( toType != null ) {
 			return (Class<? extends T>) getType( toType, flavor ); // Recursive check
 		}
+
 		return baseType;
 	}
 
