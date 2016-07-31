@@ -4,6 +4,12 @@ public class FLog {
     public static String TAG = "FUEL";
     public static final String EMPTY_STRING = "";
 
+    public static final void dSimple( String format, Object... objects ) {
+        if ( FuelInjector.isDebug() ) {
+            aLogD( defaultPrefix() + String.format( format, objects ) );
+        }
+    }
+
     public static final void d( String format, Object... objects ) {
         if ( FuelInjector.isDebug() ) {
             aLogD( defaultPrefix() + String.format( format, objects ) + defaultPostfix() );

@@ -22,17 +22,17 @@ import com.ath.fuel.err.FuelUnableToObtainContextException;
 import java.lang.ref.WeakReference;
 import java.util.Collection;
 import java.util.Collections;
-import java.util.Comparator;
 import java.util.HashMap;
 import java.util.LinkedList;
 import java.util.Map;
 import java.util.Queue;
 import java.util.WeakHashMap;
 import java.util.concurrent.locks.Lock;
+import java.util.concurrent.locks.ReentrantLock;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 
 public final class FuelInjector {
-	private static FuelInjector injector = new FuelInjector();
+	static FuelInjector injector = new FuelInjector();
 	private static Application app;
 	private static Activity activity; // Not a weakref -- this is okay because it gets assigned to the next activity each time a new activity is
 	// created, so the previous
@@ -43,8 +43,7 @@ public final class FuelInjector {
 
 	private static boolean isDebug = false;
 	private static final ReentrantReadWriteLock cacheLock = new ReentrantReadWriteLock();
-	private static final WeakHashMap<Object, Lazy> lazyCache = new WeakHashMap<>(); // parent -> LazyParent
-	private static final WeakHashMap<Object, Queue<Lazy>> preprocessQueue = new WeakHashMap<>(); // LazyParent -> Queue<LazyChildren>
+	private static final ReentrantLock lazyCacheLock = new ReentrantLock();
 	private static final SparseIntArray typeCache = new SparseIntArray();
 	private static final SparseArrayCompat<Class> leafTypeCache = new SparseArrayCompat<>();
 	private static final SparseIntArray isAppSingletonCache = new SparseIntArray();
@@ -247,13 +246,44 @@ public final class FuelInjector {
 		return singleton == 1;
 	}
 
-	static final Lazy findLazyByInstance( Object instance ) {
-		return lazyCache.get( instance );
+	final Lazy findLazyByInstance( Object instance ) {
+		Lock lock = lazyCacheLock;
+		try {
+			lock.lock();
+			for ( Object scopeObject : injector.lazyCache.keySet() ) {
+				WeakHashMap<Object, Lazy> parentToLazies = injector.lazyCache.get( scopeObject );
+				if ( parentToLazies != null ) {
+					Lazy lazy = parentToLazies.get( instance );
+					if ( lazy != null ) {
+						return lazy;
+					}
+				}
+			}
+		} finally {
+			lock.unlock();
+		}
+		return null;
 	}
 
 
-	static final void rememberLazyByInstance( Object instance, Lazy lazy ) {
-		lazyCache.put( instance, lazy );
+	final void rememberLazyByInstance( Object instance, Lazy lazy ) {
+		Lock lock = lazyCacheLock;
+		try {
+			lock.lock();
+
+			Object scopeObject = lazy.getScopeObjectRef() == null ? null : lazy.getScopeObjectRef().get();
+			if ( scopeObject == null ) {
+				scopeObject = lazy.getContext();
+			}
+			WeakHashMap<Object, Lazy> parentToLazies = injector.lazyCache.get( scopeObject );
+			if ( parentToLazies == null ) {
+				parentToLazies = new WeakHashMap<>();
+				injector.lazyCache.put( scopeObject, parentToLazies );
+			}
+			parentToLazies.put( instance, lazy );
+		} finally {
+			lock.unlock();
+		}
 	}
 
 	/**
@@ -287,24 +317,24 @@ public final class FuelInjector {
 			// whatever this is we're igniting, it wasn't injected so lets artificially create a lazy for it
 			// so that its children can find their parent
 			//rememberContext( instance, context );
-			Lazy parent = findLazyByInstance( instance );
-			if ( parent == null ) {
-				parent = Lazy.newEmptyParent( instance );
+			Lazy lazyInstance = injector.findLazyByInstance( instance );
+			if ( lazyInstance == null ) {
+				lazyInstance = Lazy.newEmptyParent( instance );
 			}
 
-			if ( !Lazy.isPreProcessed( parent ) ) {
-				doPreProcessParent( parent, context );
+			if ( !Lazy.isPreProcessed( lazyInstance ) ) {
+				doPreProcessParent( lazyInstance, context );
 			}
 
 			// In the case of a service, we need to plug it into the cache after it calls ignite because we cant construct it
 			if ( isService( instance.getClass() ) ) {
 				CacheKey key = CacheKey.attain( instance.getClass() );
-				injector.putObjectByContextType( parent, key, instance );
+				injector.putObjectByContextType( lazyInstance, key, instance );
 			}
 			// Don't try to instantiate services
 			else {
-				if ( !Lazy.isPostProcessed( parent ) ) {
-					getFuelModule().initializeNewInstance( parent );
+				if ( !Lazy.isPostProcessed( lazyInstance ) ) {
+					getFuelModule().initializeNewInstance( lazyInstance );
 				}
 			}
 
@@ -316,7 +346,7 @@ public final class FuelInjector {
 			// which calls onFueled -- so to not break the policy that says
 			// onObtainNewSingleton will only be called for Singletons
 			// we dupe the code here :/
-			if ( !FuelInjector.isSingleton( parent.leafType ) ) {
+			if ( !FuelInjector.isSingleton( lazyInstance.leafType ) ) {
 				if ( instance instanceof OnFueled ) {
 					try {
 						( (OnFueled) instance ).onFueled();
@@ -333,12 +363,12 @@ public final class FuelInjector {
 
 	private static Collection<Lazy> getPreprocessQueue( final Object parent, boolean readonly ) {
 		synchronized ( parent ) {
-			Queue<Lazy> queue = preprocessQueue.get( parent );
+			Queue<Lazy> queue = injector.preprocessQueue.get( parent );
 			if ( queue != null ) {
 				return queue;
 			} else if ( !readonly ) {
 				queue = new LinkedList<Lazy>();
-				preprocessQueue.put( parent, queue );
+				injector.preprocessQueue.put( parent, queue );
 				return queue;
 			}
 			return Collections.emptyList();
@@ -502,7 +532,7 @@ public final class FuelInjector {
 		if ( FuelInjector.isDebug() ) {
 			FLog.leaveBreadCrumb( "post-process %s", lazy );
 		}
-		rememberLazyByInstance( lazy.getInstance(), lazy );
+		injector.rememberLazyByInstance( lazy.getInstance(), lazy );
 		lazy.postProcessed = true; // before processing queue bcuz this lazy is done and its children should consider it done
 		dequeuePreProcesses( lazy );
 	}
@@ -830,6 +860,9 @@ public final class FuelInjector {
 	// - CacheKey describes the instance we're looking for
 	// - instance the hidden treasure
 	private final Map<Scope, WeakHashMap<Object, Map<CacheKey, Object>>> scopeCache = new HashMap<>();
+	private final WeakHashMap<Object, WeakHashMap<Object, Lazy>> lazyCache = new WeakHashMap<>(); // parent -> LazyParent
+	private final WeakHashMap<Object, Queue<Lazy>> preprocessQueue = new WeakHashMap<>(); // LazyParent -> Queue<LazyChildren>
+
 
 	// map (not WeakReference of injectable)
 	private final WeakHashMap<Context, WeakReference<Context>> contextToWeakContextCache = new WeakHashMap<Context, WeakReference<Context>>();
@@ -951,19 +984,52 @@ public final class FuelInjector {
 		}
 	}
 
-	private static final Comparator<Object> COMPARATOR_CLASSNAME = new Comparator<Object>() {
-		@Override
-		public int compare( Object lhs, Object rhs ) {
-			return lhs.getClass().getSimpleName().compareTo( rhs.getClass().getSimpleName() );
-		}
-	};
+	public static void debugInjectionGraph() {
+		try {
+			FLog.dSimple( "####" );
+			FLog.dSimple( "####" );
+			FLog.dSimple( "#### Scope->ScopeObject->Key->Instance Cache" );
+			Map<Scope, WeakHashMap<Object, Map<CacheKey, Object>>> scopeCache = injector.scopeCache;
+			for ( Scope scope : scopeCache.keySet() ) {
+				FLog.dSimple( "Scope = %s", scope );
+				WeakHashMap<Object, Map<CacheKey, Object>> scopeToKeyToObject = scopeCache.get( scope );
+				for ( Object scopeObject : scopeToKeyToObject.keySet() ) {
+					FLog.dSimple( " - ScopeObject = %s", scopeObject );
+					Map<CacheKey, Object> keyToObject = scopeToKeyToObject.get( scopeObject );
+					for ( CacheKey key : keyToObject.keySet() ) {
+						FLog.dSimple( " - - Key = %s", key );
+						Object obj = keyToObject.get( key );
+						FLog.dSimple( " - - - Instance = %s", obj );
+					}
+				}
+			}
 
-	private static final Comparator<CacheKey> COMPARATOR_CACHEKEY = new Comparator<CacheKey>() {
-		@Override
-		public int compare( CacheKey lhs, CacheKey rhs ) {
-			String lhsString = lhs.getLeafType().getSimpleName() + lhs.getFlavor();
-			String rhsString = rhs.getLeafType().getSimpleName() + rhs.getFlavor();
-			return lhsString.compareTo( rhsString );
+			FLog.dSimple( "####" );
+			FLog.dSimple( "#### ScopeObject->Parent->LazyInstance Lookup" );
+			WeakHashMap<Object, WeakHashMap<Object, Lazy>> lazyCache = injector.lazyCache;
+			for ( Object scopeObject : lazyCache.keySet() ) {
+				FLog.dSimple( "ScopeObject = %s", scopeObject );
+				WeakHashMap<Object, Lazy> parentToLazy = lazyCache.get( scopeObject );
+				for ( Object parent : parentToLazy.keySet() ) {
+					FLog.dSimple( " - Parent = %s", parent );
+					Lazy lazy = parentToLazy.get( parent );
+					FLog.dSimple( " - - LazyInstance = %s", lazy );
+				}
+			}
+
+			FLog.dSimple( "####" );
+			FLog.dSimple( "#### QueueOwner->Lazies Pending Pre-process" );
+			WeakHashMap<Object, Queue<Lazy>> preprocessQueue = injector.preprocessQueue;
+			for ( Object parent : preprocessQueue.keySet() ) {
+				FLog.dSimple( "Owner = %s", parent );
+				Queue<Lazy> lazies = preprocessQueue.get( parent );
+				for ( Lazy lazy : lazies ) {
+					FLog.dSimple( " - Lazy = %s", lazy );
+				}
+			}
+		} catch ( Exception e ) {
+			FLog.e( e, "Failure while logging injection graph" );
 		}
-	};
+	}
+
 }

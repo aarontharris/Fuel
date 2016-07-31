@@ -101,6 +101,7 @@ public class Lazy<T> {
 
 	static final Lazy newEmptyParent( Object parent ) {
 		Lazy lazy = new Lazy( parent.getClass() );
+		lazy.useWeakInstance = true;
 		lazy.setInstance( parent );
 
 		if ( FuelInjector.isFragment( parent.getClass() ) ) {
@@ -134,7 +135,7 @@ public class Lazy<T> {
 
 			if ( FuelInjector.isInitialized() ) {
 				// Hopefully this parent has been ignited already and we'll have a Lazy to show for it
-				lazyParent = FuelInjector.findLazyByInstance( parent );
+				lazyParent = FuelInjector.injector.findLazyByInstance( parent );
 				if ( Lazy.isPreProcessed( lazyParent ) ) {
 					context = (Context) lazyParent.contextRef.get(); // not sure why this cast is necessary? AndroidStudio fail?
 
@@ -269,8 +270,47 @@ public class Lazy<T> {
 		return context;
 	}
 
+	/**
+	 * The BaseType - the type that was requested, see {@link #getLeafType()}
+	 */
 	public final Class<T> getType() {
 		return type;
+	}
+
+	/**
+	 * The LeafType - the type the BaseType mapped to via the {@link FuelModule}. See {@link #getType()}<br>
+	 * Null until after the lazy has been post-processed (parent is context aware via parent-injection or ignite).
+	 */
+	public final Class<?> getLeafType() {
+		return leafType;
+	}
+
+	/**
+	 * @throws NullPointerException when {@link #getLeafType()} is unavailable
+	 */
+	public boolean isAppSingleton() {
+		return FuelInjector.isAppSingleton( leafType );
+	}
+
+	/**
+	 * @throws NullPointerException when {@link #getLeafType()} is unavailable
+	 */
+	public boolean isActivitySingleton() {
+		return FuelInjector.isActivitySingleton( leafType );
+	}
+
+	/**
+	 * @throws NullPointerException when {@link #getLeafType()} is unavailable
+	 */
+	public boolean isFragmentSingleton() {
+		return FuelInjector.isFragmentSingleton( leafType );
+	}
+
+	/**
+	 * @throws NullPointerException when {@link #getLeafType()} is unavailable
+	 */
+	public boolean isSingleton() {
+		return FuelInjector.isSingleton( leafType );
 	}
 
 	public final Integer getFlavor() {
