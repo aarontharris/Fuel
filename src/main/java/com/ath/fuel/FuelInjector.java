@@ -852,7 +852,6 @@ public final class FuelInjector {
 	// - CacheKey describes the instance we're looking for
 	// - instance the hidden treasure
 	private final Map<Scope, WeakHashMap<Object, Map<CacheKey, Object>>> scopeCache = new HashMap<>();
-	//private final WeakHashMap<Object, WeakHashMap<Object, Lazy>> lazyCache = new WeakHashMap<>(); // parent -> LazyParent
 	private final WeakHashMap<Object, Queue<Lazy>> preprocessQueue = new WeakHashMap<>(); // LazyParent -> Queue<LazyChildren>
 	private final Map<Object, WeakHashMap<Object, Lazy>> lazyCache = Collections.synchronizedMap( new WeakHashMap<Object, WeakHashMap<Object, Lazy>>() );
 
