@@ -20,15 +20,16 @@ import com.ath.fuel.err.FuelScopeViolationException;
 import com.ath.fuel.err.FuelUnableToObtainContextException;
 
 import java.lang.ref.WeakReference;
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.LinkedList;
+import java.util.List;
 import java.util.Map;
 import java.util.Queue;
 import java.util.WeakHashMap;
 import java.util.concurrent.locks.Lock;
-import java.util.concurrent.locks.ReentrantLock;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 
 public final class FuelInjector {
@@ -43,8 +44,6 @@ public final class FuelInjector {
 
 	private static boolean isDebug = false;
 	private static final ReentrantReadWriteLock cacheLock = new ReentrantReadWriteLock();
-	private static final ReentrantLock lazyCacheLock = new ReentrantLock();
-	private static final SparseIntArray typeCache = new SparseIntArray();
 	private static final SparseArrayCompat<Class> leafTypeCache = new SparseArrayCompat<>();
 	private static final SparseIntArray isAppSingletonCache = new SparseIntArray();
 	private static final SparseIntArray isActSingletonCache = new SparseIntArray();
@@ -247,10 +246,12 @@ public final class FuelInjector {
 	}
 
 	final Lazy findLazyByInstance( Object instance ) {
-		Lock lock = lazyCacheLock;
-		try {
-			lock.lock();
-			for ( Object scopeObject : injector.lazyCache.keySet() ) {
+		// work-around for WeakHashMap Iterators being fast-fail
+		List<Object> scopedObjects = new ArrayList<>( injector.lazyCache.keySet() );
+
+		//for ( Object scopeObject : injector.lazyCache.keySet() ) {
+		for ( Object scopeObject : scopedObjects ) {
+			if ( scopeObject != null ) {
 				WeakHashMap<Object, Lazy> parentToLazies = injector.lazyCache.get( scopeObject );
 				if ( parentToLazies != null ) {
 					Lazy lazy = parentToLazies.get( instance );
@@ -259,31 +260,22 @@ public final class FuelInjector {
 					}
 				}
 			}
-		} finally {
-			lock.unlock();
 		}
 		return null;
 	}
 
 
 	final void rememberLazyByInstance( Object instance, Lazy lazy ) {
-		Lock lock = lazyCacheLock;
-		try {
-			lock.lock();
-
-			Object scopeObject = lazy.getScopeObjectRef() == null ? null : lazy.getScopeObjectRef().get();
-			if ( scopeObject == null ) {
-				scopeObject = lazy.getContext();
-			}
-			WeakHashMap<Object, Lazy> parentToLazies = injector.lazyCache.get( scopeObject );
-			if ( parentToLazies == null ) {
-				parentToLazies = new WeakHashMap<>();
-				injector.lazyCache.put( scopeObject, parentToLazies );
-			}
-			parentToLazies.put( instance, lazy );
-		} finally {
-			lock.unlock();
+		Object scopeObject = lazy.getScopeObjectRef() == null ? null : lazy.getScopeObjectRef().get();
+		if ( scopeObject == null ) {
+			scopeObject = lazy.getContext();
 		}
+		WeakHashMap<Object, Lazy> parentToLazies = injector.lazyCache.get( scopeObject );
+		if ( parentToLazies == null ) {
+			parentToLazies = new WeakHashMap<>();
+			injector.lazyCache.put( scopeObject, parentToLazies );
+		}
+		parentToLazies.put( instance, lazy );
 	}
 
 	/**
@@ -860,9 +852,9 @@ public final class FuelInjector {
 	// - CacheKey describes the instance we're looking for
 	// - instance the hidden treasure
 	private final Map<Scope, WeakHashMap<Object, Map<CacheKey, Object>>> scopeCache = new HashMap<>();
-	private final WeakHashMap<Object, WeakHashMap<Object, Lazy>> lazyCache = new WeakHashMap<>(); // parent -> LazyParent
+	//private final WeakHashMap<Object, WeakHashMap<Object, Lazy>> lazyCache = new WeakHashMap<>(); // parent -> LazyParent
 	private final WeakHashMap<Object, Queue<Lazy>> preprocessQueue = new WeakHashMap<>(); // LazyParent -> Queue<LazyChildren>
-
+	private final Map<Object, WeakHashMap<Object, Lazy>> lazyCache = Collections.synchronizedMap( new WeakHashMap<Object, WeakHashMap<Object, Lazy>>() );
 
 	// map (not WeakReference of injectable)
 	private final WeakHashMap<Context, WeakReference<Context>> contextToWeakContextCache = new WeakHashMap<Context, WeakReference<Context>>();
@@ -1006,7 +998,7 @@ public final class FuelInjector {
 
 			FLog.dSimple( "####" );
 			FLog.dSimple( "#### ScopeObject->Parent->LazyInstance Lookup" );
-			WeakHashMap<Object, WeakHashMap<Object, Lazy>> lazyCache = injector.lazyCache;
+			Map<Object, WeakHashMap<Object, Lazy>> lazyCache = injector.lazyCache;
 			for ( Object scopeObject : lazyCache.keySet() ) {
 				FLog.dSimple( "ScopeObject = %s", scopeObject );
 				WeakHashMap<Object, Lazy> parentToLazy = lazyCache.get( scopeObject );
