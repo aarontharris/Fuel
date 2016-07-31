@@ -128,7 +128,7 @@ public class Lazy<T> {
 		Context context = null;
 		Lazy lazyParent = null;
 
-		// lazy.parentRef = new WeakReference<Object>( parent );
+		lazy.parentRef = new WeakReference<Object>( parent );
 
 		try {
 			if ( FuelInjector.isDebug() ) {
