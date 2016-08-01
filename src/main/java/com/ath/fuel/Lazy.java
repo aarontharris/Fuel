@@ -101,6 +101,7 @@ public class Lazy<T> {
 
 	static final Lazy newEmptyParent( Object parent ) {
 		Lazy lazy = new Lazy( parent.getClass() );
+		lazy.useWeakInstance = true;
 		lazy.setInstance( parent );
 
 		if ( FuelInjector.isFragment( parent.getClass() ) ) {
@@ -127,6 +128,8 @@ public class Lazy<T> {
 		Context context = null;
 		Lazy lazyParent = null;
 
+		lazy.parentRef = new WeakReference<Object>( parent );
+
 		try {
 			if ( FuelInjector.isDebug() ) {
 				FLog.leaveBreadCrumb( "initialize lazy %s, %s", lazy, parent );
@@ -134,7 +137,7 @@ public class Lazy<T> {
 
 			if ( FuelInjector.isInitialized() ) {
 				// Hopefully this parent has been ignited already and we'll have a Lazy to show for it
-				lazyParent = FuelInjector.findLazyByInstance( parent );
+				lazyParent = FuelInjector.injector.findLazyByInstance( parent );
 				if ( Lazy.isPreProcessed( lazyParent ) ) {
 					context = (Context) lazyParent.contextRef.get(); // not sure why this cast is necessary? AndroidStudio fail?
 
@@ -147,6 +150,8 @@ public class Lazy<T> {
 			lazy.contextRef = null; // reset
 		}
 
+		// Context context = FuelInjector.getFuelModule().provideContext( parent ); // FIXME
+
 		if ( context == null ) {
 			// queue up this lazy until the parent is ignited
 			FuelInjector.enqueueLazy( parent, lazy );
@@ -158,6 +163,7 @@ public class Lazy<T> {
 	boolean postProcessed = false;
 
 	private WeakReference<Object> scopeObjectRef; // We do object bcuz we dont know if its v4.frag or just frag :/
+	private WeakReference<Object> parentRef;
 
 	Class<T> type; // the type requested, but not necessarily the type to be instantiated
 	Class<?> leafType; // the type to be instantiated, not necessarily the type requested but some derivitive.
@@ -172,7 +178,6 @@ public class Lazy<T> {
 	private final Integer flavor;
 	private boolean isInEditMode;
 	private boolean debug;
-	private WeakReference<Object> parentRef;
 
 	Lazy( Class<T> type ) {
 		this.type = type;
@@ -269,8 +274,47 @@ public class Lazy<T> {
 		return context;
 	}
 
+	/**
+	 * The BaseType - the type that was requested, see {@link #getLeafType()}
+	 */
 	public final Class<T> getType() {
 		return type;
+	}
+
+	/**
+	 * The LeafType - the type the BaseType mapped to via the {@link FuelModule}. See {@link #getType()}<br>
+	 * Null until after the lazy has been post-processed (parent is context aware via parent-injection or ignite).
+	 */
+	public final Class<?> getLeafType() {
+		return leafType;
+	}
+
+	/**
+	 * @throws NullPointerException when {@link #getLeafType()} is unavailable
+	 */
+	public boolean isAppSingleton() {
+		return FuelInjector.isAppSingleton( leafType );
+	}
+
+	/**
+	 * @throws NullPointerException when {@link #getLeafType()} is unavailable
+	 */
+	public boolean isActivitySingleton() {
+		return FuelInjector.isActivitySingleton( leafType );
+	}
+
+	/**
+	 * @throws NullPointerException when {@link #getLeafType()} is unavailable
+	 */
+	public boolean isFragmentSingleton() {
+		return FuelInjector.isFragmentSingleton( leafType );
+	}
+
+	/**
+	 * @throws NullPointerException when {@link #getLeafType()} is unavailable
+	 */
+	public boolean isSingleton() {
+		return FuelInjector.isSingleton( leafType );
 	}
 
 	public final Integer getFlavor() {
@@ -300,22 +344,6 @@ public class Lazy<T> {
 	}
 
 	/**
-	 * Not a noob feature -- use this only to late-ignite a lazy with the given context<br>
-	 * Useful when you need a one-off {@link Lazy#attain(Object, Class, Integer)} and the context is provided late or in an odd manner
-	 */
-	public T get( Context context ) throws FuelInjectionException {
-		if ( getContext() == null && parentRef != null ) {
-			Object parent = parentRef.get();
-			if ( parent != null ) {
-				if ( context != null ) {
-					FuelInjector.ignite( context, parent );
-				}
-			}
-		}
-		return get();
-	}
-
-	/**
 	 * Get the instance associated with this type.<br>
 	 * May return null and will never throw an exception, however the FuelModule.OnLazyGetFailed will be called.
 	 */
@@ -339,19 +367,6 @@ public class Lazy<T> {
 				if ( isInEditMode ) {
 					setInstance( type.newInstance() );
 					return instance;
-				}
-
-				// attempt to get the context and ignite parent
-				// because if we're here then the parent never got ignited
-				// if we're lucky the parent IS a context, if so lets use it.
-				if ( getContext() == null && parentRef != null ) {
-					Object parent = parentRef.get();
-					if ( parent != null ) {
-						Context context = FuelInjector.getFuelModule().provideContext( parent );
-						if ( context != null ) {
-							FuelInjector.ignite( context, parent );
-						}
-					}
 				}
 
 				// If we guessed during attain and still
