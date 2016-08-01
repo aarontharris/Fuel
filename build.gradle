@@ -1,6 +1,5 @@
 buildscript {
     repositories {
-
         jcenter()
     }
     dependencies {
@@ -13,21 +12,21 @@ apply plugin: 'com.android.library'
 apply plugin: 'com.jfrog.bintray'
 apply plugin: 'com.github.dcendents.android-maven'
 
-group = 'com.github.aaronharris'
-version = '1.0'
+group = 'com.ath.fuel'
+version = '1.0.1'
 
 bintray {
-    user = 'skostin'
+    user = 'aarontharris'
     key = 'api key goes here'
     pkg {
         repo = 'maven'
-        name = 'com.github.aaronharris'
+        name = 'com.ath.fuel'
 
         version {
-            name = 'fuel'
-            desc = 'Android DI framework'
+            name = 'Fuel'
+            desc = 'Android Dependency Injection Framework'
             released  = new Date()
-            vcsTag = '1.0'
+            vcsTag = '1.0.1'
         }
 
         licenses = ['Apache-2.0']
@@ -45,7 +44,7 @@ android {
         minSdkVersion 14
         targetSdkVersion 24
         versionCode 1
-        versionName "1.0"
+        versionName "1.0.1"
     }
     buildTypes {
         release {
