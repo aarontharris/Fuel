@@ -1,6 +1,6 @@
 package com.ath.fuel.err;
 
-@SuppressWarnings("serial")
+@SuppressWarnings( "serial" )
 public class FuelInjectionBindException extends RuntimeException {
 
     public FuelInjectionBindException( Exception exception ) {

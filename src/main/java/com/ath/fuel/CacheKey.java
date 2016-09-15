@@ -4,6 +4,18 @@ package com.ath.fuel;
 class CacheKey {
 
     public static final Integer DEFAULT_FLAVOR = null;
+    private Class<?> leafType; // compared by address not by value so be careful
+    private Integer flavor; // compared by address not by value so be careful
+
+    private CacheKey( Class<?> leafType ) {
+        this( leafType, DEFAULT_FLAVOR );
+    }
+
+
+    private CacheKey( Class<?> leafType, Integer flavor ) {
+        this.leafType = leafType;
+        this.flavor = flavor;
+    }
 
     public static CacheKey attain( Class<?> leafType ) {
         return new CacheKey( leafType, DEFAULT_FLAVOR );
@@ -15,19 +27,6 @@ class CacheKey {
 
     public static CacheKey attain( Lazy lazy ) {
         return new CacheKey( lazy.leafType, lazy.getFlavor() );
-    }
-
-
-    private Class<?> leafType; // compared by address not by value so be careful
-    private Integer flavor; // compared by address not by value so be careful
-
-    private CacheKey( Class<?> leafType ) {
-        this( leafType, DEFAULT_FLAVOR );
-    }
-
-    private CacheKey( Class<?> leafType, Integer flavor ) {
-        this.leafType = leafType;
-        this.flavor = flavor;
     }
 
     public Class<?> getLeafType() {

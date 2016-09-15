@@ -9,15 +9,15 @@ import com.ath.fuel.Scope;
 @SuppressWarnings( "serial" )
 public class FuelScopeViolationException extends FuelInjectionException {
 
-	public FuelScopeViolationException( Exception exception ) {
-		super( exception );
-	}
+    public FuelScopeViolationException( Exception exception ) {
+        super( exception );
+    }
 
-	public FuelScopeViolationException( String format, Object... objects ) {
-		super( String.format( format, objects ) );
-	}
+    public FuelScopeViolationException( String format, Object... objects ) {
+        super( String.format( format, objects ) );
+    }
 
-	public FuelScopeViolationException( Exception exception, String format, Object... objects ) {
-		super( String.format( format, objects ), exception );
-	}
+    public FuelScopeViolationException( Exception exception, String format, Object... objects ) {
+        super( String.format( format, objects ), exception );
+    }
 }

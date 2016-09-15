@@ -8,15 +8,15 @@ package com.ath.fuel.err;
 @SuppressWarnings( "serial" )
 public class FuelNoSuitableConstructorException extends FuelInjectionException {
 
-	public FuelNoSuitableConstructorException( Exception exception ) {
-		super( exception );
-	}
+    public FuelNoSuitableConstructorException( Exception exception ) {
+        super( exception );
+    }
 
-	public FuelNoSuitableConstructorException( String format, Object... objects ) {
-		super( String.format( format, objects ) );
-	}
+    public FuelNoSuitableConstructorException( String format, Object... objects ) {
+        super( String.format( format, objects ) );
+    }
 
-	public FuelNoSuitableConstructorException( Exception exception, String format, Object... objects ) {
-		super( String.format( format, objects ), exception );
-	}
+    public FuelNoSuitableConstructorException( Exception exception, String format, Object... objects ) {
+        super( String.format( format, objects ), exception );
+    }
 }

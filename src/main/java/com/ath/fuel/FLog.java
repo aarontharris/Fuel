@@ -1,8 +1,8 @@
 package com.ath.fuel;
 
 public class FLog {
-    public static String TAG = "FUEL";
     public static final String EMPTY_STRING = "";
+    public static String TAG = "FUEL";
 
     public static final void dSimple( String format, Object... objects ) {
         if ( FuelInjector.isDebug() ) {

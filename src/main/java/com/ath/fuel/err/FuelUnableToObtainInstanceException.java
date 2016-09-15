@@ -7,15 +7,15 @@ package com.ath.fuel.err;
 @SuppressWarnings( "serial" )
 public class FuelUnableToObtainInstanceException extends FuelInjectionException {
 
-	public FuelUnableToObtainInstanceException( Exception exception ) {
-		super( exception );
-	}
+    public FuelUnableToObtainInstanceException( Exception exception ) {
+        super( exception );
+    }
 
-	public FuelUnableToObtainInstanceException( String format, Object... objects ) {
-		super( String.format( format, objects ) );
-	}
+    public FuelUnableToObtainInstanceException( String format, Object... objects ) {
+        super( String.format( format, objects ) );
+    }
 
-	public FuelUnableToObtainInstanceException( Exception exception, String format, Object... objects ) {
-		super( String.format( format, objects ), exception );
-	}
+    public FuelUnableToObtainInstanceException( Exception exception, String format, Object... objects ) {
+        super( String.format( format, objects ), exception );
+    }
 }

@@ -5,15 +5,15 @@ package com.ath.fuel.err;
  */
 @SuppressWarnings( "serial" )
 public class FuelInvalidParentException extends FuelInjectionException {
-	public FuelInvalidParentException( Exception exception ) {
-		super( exception );
-	}
+    public FuelInvalidParentException( Exception exception ) {
+        super( exception );
+    }
 
-	public FuelInvalidParentException( String format, Object... objects ) {
-		super( String.format( format, objects ) );
-	}
+    public FuelInvalidParentException( String format, Object... objects ) {
+        super( String.format( format, objects ) );
+    }
 
-	public FuelInvalidParentException( Exception exception, String format, Object... objects ) {
-		super( String.format( format, objects ), exception );
-	}
+    public FuelInvalidParentException( Exception exception, String format, Object... objects ) {
+        super( String.format( format, objects ), exception );
+    }
 }
