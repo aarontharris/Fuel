@@ -17,7 +17,7 @@ version = '1.0.1'
 
 bintray {
     user = 'aarontharris'
-    key = 'api key goes here'
+    key = 'asdf'
     pkg {
         repo = 'maven'
         name = 'com.ath.fuel'
