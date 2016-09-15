@@ -12,6 +12,9 @@ Clone the Fuel submodule under your project folder
 git submodule add -b release_1.0.1 git@github.com:aarontharris/Fuel.git Fuel
 ```
 
+# Fuek Gradle
+```compile 'com.ath.fuel:Fuel:1.0.1'```
+
 # Quick Integration Tutorial
 [Youtube Fuel Tutorial](https://www.youtube.com/watch?v=CuWsEsSgPso)
 
