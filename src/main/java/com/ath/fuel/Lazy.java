@@ -1,5 +1,6 @@
 package com.ath.fuel;
 
+import android.app.Service;
 import android.content.Context;
 import android.support.annotation.NonNull;
 import android.view.View;
@@ -46,6 +47,10 @@ public class Lazy<T> {
      */
     public static final <TYPE> Lazy<TYPE> attain( Object parent, Class<TYPE> clazz ) {
         return newInstance( parent, clazz, null );
+    }
+
+    public static final <TYPE> Lazy<TYPE> attain( Service parent, Class<TYPE> clazz ) {
+        return newInstance( FuelInjector.getApp(), clazz, null );
     }
 
     /**
