@@ -106,8 +106,8 @@ public final class FuelInjector {
                 // no-op
             } else if ( context instanceof Application ) {
                 // no-op
-            } else if ( context instanceof Service ) {
-                // no-op
+                //} else if ( context instanceof Service ) {
+                //    context = context.getApplicationContext();
             } else if ( context instanceof ContextWrapper ) { // some other foreign context
                 Context out = toContext( ( (ContextWrapper) context ).getBaseContext() );
                 if ( out != null ) {
@@ -301,6 +301,11 @@ public final class FuelInjector {
 
             if ( isDebug() ) {
                 FLog.leaveBreadCrumb( "ignite %s w/ %s", instance, context );
+            }
+
+            // Services use App as their scope
+            if ( instance instanceof Service ) {
+                return;
             }
 
             // skip wrappers
