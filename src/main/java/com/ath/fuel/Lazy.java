@@ -111,7 +111,7 @@ public class Lazy<T> {
         lazy.setInstance( parent );
 
         if ( FuelInjector.isFragment( parent.getClass() ) ) {
-            lazy.setScopeObjectRef( new WeakReference( parent ) );
+            lazy.scopeObjectRef = new WeakReference( parent );
         }
 
         return lazy;
@@ -199,12 +199,8 @@ public class Lazy<T> {
         this.flavor = flavor;
     }
 
-    void setScopeObjectRef( WeakReference<Object> scopeObjectRef ) {
-        this.scopeObjectRef = scopeObjectRef;
-    }
-
-    WeakReference<Object> getScopeObjectRef() {
-        return scopeObjectRef;
+    void inheritScopeRef( Lazy parent ) {
+        this.scopeObjectRef = parent.scopeObjectRef;
     }
 
     /**
@@ -235,7 +231,7 @@ public class Lazy<T> {
                     scopeObject = getContext();
                     break;
                 case Fragment:
-                    scopeObject = getScopeObjectRef() == null ? null : getScopeObjectRef().get();
+                    scopeObject = scopeObjectRef == null ? null : scopeObjectRef.get();
                     break;
             }
         }

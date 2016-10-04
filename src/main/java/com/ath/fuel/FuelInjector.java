@@ -474,7 +474,7 @@ public final class FuelInjector {
             child.scope = parent.scope;
         }
         validateScope( parent.scope, child.scope );
-        child.setScopeObjectRef( parent.getScopeObjectRef() );
+        child.inheritScopeRef( parent );
 
         if ( child.isDebug() ) {
             FLog.leaveBreadCrumb( "doPreProcessChild for %s, context ended up with %s", child, context == null ? "null" : context.getClass().getSimpleName() );
@@ -661,8 +661,9 @@ public final class FuelInjector {
             }
             return (T) getApp();
         } else if ( isFragment( key.getLeafType() ) ) {
-            WeakReference fragRef = lazy.getScopeObjectRef();
-            return (T) ( fragRef == null ? null : fragRef.get() );
+            //WeakReference fragRef = lazy.getScopeObjectRef();
+            //return (T) ( fragRef == null ? null : fragRef.get() );
+            return (T) lazy.toObjectScope();
         } else if ( isActivity( key.getLeafType() ) && context instanceof Activity ) {
             if ( debug ) {
                 FLog.leaveBreadCrumb( "getInstance for Activity got %s", context == null ? "null" : context.getClass().getSimpleName() );
