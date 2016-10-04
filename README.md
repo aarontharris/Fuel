@@ -190,6 +190,7 @@ Fuel can only construct objects that have one of the following
 * A Public Empty Constructor
 * A Public Constructor with arguments that Fuel is capable of constructing
   * Each argument must also meet the construction requirements, and so must their constructor arguments if any, and so on recursively.
+  * Be careful to consider cyclical references of types and their constructors:  A( B ) and B( A ) will cause a stackoverflow.
 
 To avoid confusion, precedence will always be given to empty constructors if available.  If you find yourself with an Class in need of multiple constructors and you want Fuel to choose the correct constructor, consider a Provider.
 
