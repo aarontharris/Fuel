@@ -54,6 +54,7 @@ public final class FuelInjector {
     private static final SparseIntArray isFragCache = new SparseIntArray();
     private static final SparseIntArray isServCache = new SparseIntArray();
     private static final SparseIntArray isContextCache = new SparseIntArray();
+    private static final SparseIntArray isInjectionRequired = new SparseIntArray();
 
     /**
      * True will tighten up tolerances for quicker failures and more verbosity
@@ -193,6 +194,16 @@ public final class FuelInjector {
             isSingletonCache.put( hashCode, singleton );
         }
         return singleton == 1;
+    }
+
+    static final boolean isInjectionRequired( Class<?> leafType ) {
+        int hashCode = leafType.hashCode();
+        int required = isInjectionRequired.get( hashCode );
+        if ( required == TYPE_UNDEF ) {
+            required = leafType.isAnnotationPresent( RequiresInjection.class ) ? 1 : -1;
+            isInjectionRequired.put( hashCode, required );
+        }
+        return required == 1;
     }
 
     static boolean isApplication( Class<?> leafType ) {
@@ -335,24 +346,7 @@ public final class FuelInjector {
                 }
             }
 
-
-            // Kind of a hack
-            // We only do it if its not a singleton because
-            // we already did it inside initializeNewInstance if it was a singleton
-            // thats because initializeNewInstance calls onObtainNewSingleton
-            // which calls onFueled -- so to not break the policy that says
-            // onObtainNewSingleton will only be called for Singletons
-            // we dupe the code here :/
-            if ( !FuelInjector.isSingleton( lazyInstance.leafType ) ) {
-                if ( instance instanceof OnFueled ) {
-                    try {
-                        ( (OnFueled) instance ).onFueled();
-                    } catch ( Exception e ) {
-                        FLog.e( e );
-                    }
-                }
-            }
-
+            getFuelModule().doOnFueled( lazyInstance, true );
         } catch ( Exception e ) {
             throw FuelInjector.doFailure( null, e );
         }
@@ -419,7 +413,7 @@ public final class FuelInjector {
             Object service = getServiceInstance( lazy, key, false );
             if ( service != null ) {
                 // FLog.d( "SERVICE: doServicePreProcess got Service: %s = %s", lazy.leafType.getSimpleName(), service );
-                lazy.instance = service;
+                lazy.setInstance( service );
             } else {
                 // FLog.d( "SERVICE: Starting Service: %s", lazy.leafType.getSimpleName() );
                 FuelInjector.getApp().startService( new Intent( FuelInjector.getApp(), lazy.leafType ) );
