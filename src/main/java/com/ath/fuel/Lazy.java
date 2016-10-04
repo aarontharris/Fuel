@@ -3,6 +3,7 @@ package com.ath.fuel;
 import android.app.Service;
 import android.content.Context;
 import android.support.annotation.NonNull;
+import android.support.annotation.Nullable;
 import android.view.View;
 
 import com.ath.fuel.err.FuelInjectionException;
@@ -204,6 +205,45 @@ public class Lazy<T> {
 
     WeakReference<Object> getScopeObjectRef() {
         return scopeObjectRef;
+    }
+
+    /**
+     * Some scopes are consolidated into a shared cache use this to get the cacheScope based on the literal scope
+     *
+     * @return null indicates this lazy is not cacheable
+     */
+    @Nullable Scope toCacheScope() {
+        switch ( scope ) {
+            case Application:
+            case Activity:
+            case Fragment:
+                return scope;
+        }
+        return null;
+    }
+
+    /**
+     * @return null indicates this lazy is not cacheable
+     */
+    @Nullable Object toObjectScope() {
+        Object scopeObject = null;
+        Scope scope = toCacheScope();
+        if ( scope != null ) {
+            switch ( scope ) {
+                case Application:
+                case Activity:
+                    scopeObject = getContext();
+                    break;
+                case Fragment:
+                    scopeObject = getScopeObjectRef() == null ? null : getScopeObjectRef().get();
+                    break;
+            }
+        }
+        return scopeObject;
+    }
+
+    boolean isCacheable() {
+        return toCacheScope() != null && toObjectScope() != null;
     }
 
     public Lazy setDebug() {

@@ -266,7 +266,7 @@ public final class FuelInjector {
 
 
     final void rememberLazyByInstance( Object instance, Lazy lazy ) {
-        Object scopeObject = lazy.getScopeObjectRef() == null ? null : lazy.getScopeObjectRef().get();
+        Object scopeObject = lazy.toObjectScope();
         if ( scopeObject == null ) {
             scopeObject = lazy.getContext();
         }
@@ -878,55 +878,14 @@ public final class FuelInjector {
     }
 
     /**
-     * Some scopes are consolidated into a shared cache use this to get the cacheScope based on the literal scope
-     *
-     * @param lazy
-     * @return null indicates this lazy is not cacheable
-     */
-    @Nullable Scope toCacheScope( Lazy lazy ) {
-        switch ( lazy.scope ) {
-            case Application:
-            case Activity:
-            case Fragment:
-                return lazy.scope;
-        }
-        return null;
-    }
-
-    /**
-     * @param lazy
-     * @return null indicates this lazy is not cacheable
-     */
-    @Nullable Object toObjectScope( Lazy lazy ) {
-        Object scopeObject = null;
-        Scope scope = toCacheScope( lazy );
-        if ( scope != null ) {
-            switch ( scope ) {
-                case Application:
-                case Activity:
-                    scopeObject = lazy.getContext();
-                    break;
-                case Fragment:
-                    scopeObject = lazy.getScopeObjectRef() == null ? null : lazy.getScopeObjectRef().get();
-                    break;
-            }
-        }
-        return scopeObject;
-    }
-
-    boolean isCacheable( Lazy lazy ) {
-        return toCacheScope( lazy ) != null && toObjectScope( lazy ) != null;
-    }
-
-    /**
      * @param primeTheCacheEntry if true, an empty entry will be added for this context if not already present, false leaves it alone and returns
      *                           empty
      * @return an "immutable" map when primeTheCachEntry = false :/ meh
      */
     private Map<CacheKey, Object> getCacheByContextNotThreadSafe( Lazy lazy, boolean primeTheCacheEntry ) {
         Map<CacheKey, Object> contextCache = null;
-        Scope cacheScope = toCacheScope( lazy );
-        Object scopeObject = toObjectScope( lazy );
+        Scope cacheScope = lazy.toCacheScope();
+        Object scopeObject = lazy.toObjectScope();
 
         // if either are null then this lazy is not cacheable
         if ( cacheScope != null && scopeObject != null ) {
