@@ -11,7 +11,6 @@ import android.os.Bundle;
 import android.support.annotation.MainThread;
 import android.support.annotation.Nullable;
 import android.support.v4.util.SparseArrayCompat;
-import android.util.SparseIntArray;
 import android.view.View;
 
 import com.ath.fuel.err.FuelInjectionException;
@@ -45,16 +44,16 @@ public final class FuelInjector {
     private static boolean isDebug = false;
     private static final ReentrantReadWriteLock cacheLock = new ReentrantReadWriteLock();
     private static final SparseArrayCompat<Class> leafTypeCache = new SparseArrayCompat<>();
-    private static final SparseIntArray isAppSingletonCache = new SparseIntArray();
-    private static final SparseIntArray isActSingletonCache = new SparseIntArray();
-    private static final SparseIntArray isFragSingletonCache = new SparseIntArray();
-    private static final SparseIntArray isSingletonCache = new SparseIntArray();
-    private static final SparseIntArray isAppCache = new SparseIntArray();
-    private static final SparseIntArray isActCache = new SparseIntArray();
-    private static final SparseIntArray isFragCache = new SparseIntArray();
-    private static final SparseIntArray isServCache = new SparseIntArray();
-    private static final SparseIntArray isContextCache = new SparseIntArray();
-    private static final SparseIntArray isInjectionRequired = new SparseIntArray();
+    private static final Map<Class, Boolean> isAppSingletonCache = new HashMap<>();
+    private static final Map<Class, Boolean> isSingletonCache = new HashMap<>();
+    private static final Map<Class, Boolean> isActSingletonCache = new HashMap<>();
+    private static final Map<Class, Boolean> isFragSingletonCache = new HashMap<>();
+    private static final Map<Class, Boolean> isAppCache = new HashMap<>();
+    private static final Map<Class, Boolean> isActCache = new HashMap<>();
+    private static final Map<Class, Boolean> isFragCache = new HashMap<>();
+    private static final Map<Class, Boolean> isServCache = new HashMap<>();
+    private static final Map<Class, Boolean> isContextCache = new HashMap<>();
+    private static final Map<Class, Boolean> isInjectionRequired = new HashMap<>();
 
     /**
      * True will tighten up tolerances for quicker failures and more verbosity
@@ -136,14 +135,6 @@ public final class FuelInjector {
         return !isInitialized();
     }
 
-
-    static final int TYPE_UNDEF = 0;
-    static final int TYPE_OBJECT = 1;
-    static final int TYPE_SINGLETON = 2;
-    static final int TYPE_APP_SINGLETON = 3;
-    static final int TYPE_ACTIVITY_SINGLETON = 4;
-    static final int TYPE_FRAG_SINGLETON = 5;
-
     static final <T> Class<? extends T> toLeafType( Class<T> type, Integer flavor ) {
         if ( flavor == null ) {
             Class leafType = leafTypeCache.get( type.hashCode() );
@@ -157,103 +148,93 @@ public final class FuelInjector {
     }
 
     static final boolean isAppSingleton( Class<?> leafType ) {
-        int hashCode = leafType.hashCode();
-        int singleton = isAppSingletonCache.get( hashCode );
-        if ( singleton == TYPE_UNDEF ) {
-            singleton = leafType.isAnnotationPresent( AppSingleton.class ) ? 1 : -1;
-            isAppSingletonCache.put( hashCode, singleton );
+        Boolean singleton = isAppSingletonCache.get( leafType );
+        if ( singleton == null ) {
+            singleton = leafType.isAnnotationPresent( AppSingleton.class );
+            isAppSingletonCache.put( leafType, singleton );
         }
-        return singleton == 1;
+        return singleton;
     }
 
     static final boolean isActivitySingleton( Class<?> leafType ) {
-        int hashCode = leafType.hashCode();
-        int singleton = isActSingletonCache.get( hashCode );
-        if ( singleton == TYPE_UNDEF ) {
-            singleton = leafType.isAnnotationPresent( ActivitySingleton.class ) ? 1 : -1;
-            isActSingletonCache.put( hashCode, singleton );
+        Boolean singleton = isActSingletonCache.get( leafType );
+        if ( singleton == null ) {
+            singleton = leafType.isAnnotationPresent( ActivitySingleton.class );
+            isActSingletonCache.put( leafType, singleton );
         }
-        return singleton == 1;
+        return singleton;
     }
 
     static final boolean isFragmentSingleton( Class<?> leafType ) {
-        int hashCode = leafType.hashCode();
-        int singleton = isFragSingletonCache.get( hashCode );
-        if ( singleton == TYPE_UNDEF ) {
-            singleton = leafType.isAnnotationPresent( FragmentSingleton.class ) ? 1 : -1;
-            isFragSingletonCache.put( hashCode, singleton );
+        Boolean singleton = isFragSingletonCache.get( leafType );
+        if ( singleton == null ) {
+            singleton = leafType.isAnnotationPresent( FragmentSingleton.class );
+            isFragSingletonCache.put( leafType, singleton );
         }
-        return singleton == 1;
+        return singleton;
     }
 
     static final boolean isSingleton( Class<?> leafType ) {
-        int hashCode = leafType.hashCode();
-        int singleton = isSingletonCache.get( hashCode );
-        if ( singleton == TYPE_UNDEF ) {
-            singleton = ( isAppSingleton( leafType ) || isActivitySingleton( leafType ) || isFragmentSingleton( leafType ) ) ? 1 : -1;
-            isSingletonCache.put( hashCode, singleton );
+        Boolean singleton = isSingletonCache.get( leafType );
+        if ( singleton == null ) {
+            singleton = ( isAppSingleton( leafType ) || isActivitySingleton( leafType ) || isFragmentSingleton( leafType ) );
+            isSingletonCache.put( leafType, singleton );
         }
-        return singleton == 1;
+        return singleton;
     }
 
     static final boolean isInjectionRequired( Class<?> leafType ) {
-        int hashCode = leafType.hashCode();
-        int required = isInjectionRequired.get( hashCode );
-        if ( required == TYPE_UNDEF ) {
-            required = leafType.isAnnotationPresent( RequiresInjection.class ) ? 1 : -1;
-            isInjectionRequired.put( hashCode, required );
+        Boolean match = isInjectionRequired.get( leafType );
+        if ( match == null ) {
+            match = leafType.isAnnotationPresent( RequiresInjection.class );
+            isInjectionRequired.put( leafType, match );
         }
-        return required == 1;
+        return match;
     }
 
     static boolean isApplication( Class<?> leafType ) {
-        int hashCode = leafType.hashCode();
-        int singleton = isAppCache.get( hashCode );
-        if ( singleton == TYPE_UNDEF ) {
-            singleton = Application.class.isAssignableFrom( leafType ) ? 1 : -1;
-            isAppCache.put( hashCode, singleton );
+        Boolean match = isAppCache.get( leafType );
+        if ( match == null ) {
+            match = Application.class.isAssignableFrom( leafType );
+            isAppCache.put( leafType, match );
         }
-        return singleton == 1;
+        return match;
     }
 
     static boolean isActivity( Class<?> leafType ) {
-        int hashCode = leafType.hashCode();
-        int singleton = isActCache.get( hashCode );
-        if ( singleton == TYPE_UNDEF ) {
-            singleton = Activity.class.isAssignableFrom( leafType ) ? 1 : -1;
-            isActCache.put( hashCode, singleton );
+        Boolean match = isActCache.get( leafType );
+        if ( match == null ) {
+            match = Activity.class.isAssignableFrom( leafType );
+            isActCache.put( leafType, match );
         }
-        return singleton == 1;
+        return match;
     }
 
     static boolean isFragment( Class<?> leafType ) {
-        int hashCode = leafType.hashCode();
-        int singleton = isFragCache.get( hashCode );
-        if ( singleton == TYPE_UNDEF ) {
-            singleton = ( android.app.Fragment.class.isAssignableFrom( leafType ) || android.support.v4.app.Fragment.class.isAssignableFrom( leafType ) ) ? 1 : -1;
-            isFragCache.put( hashCode, singleton );
+        Boolean match = isFragCache.get( leafType );
+        if ( match == null ) {
+            match = ( android.app.Fragment.class.isAssignableFrom( leafType ) || android.support.v4.app.Fragment.class.isAssignableFrom( leafType ) );
+            isFragCache.put( leafType, match );
         }
-        return singleton == 1;
+        return match;
     }
 
     static boolean isService( Class<?> leafType ) {
-        int hashCode = leafType.hashCode();
-        int singleton = isServCache.get( hashCode );
-        if ( singleton == TYPE_UNDEF ) {
-            singleton = Service.class.isAssignableFrom( leafType ) ? 1 : -1;
-            isServCache.put( hashCode, singleton );
+        Boolean match = isServCache.get( leafType );
+        if ( match == null ) {
+            match = Service.class.isAssignableFrom( leafType );
+            isServCache.put( leafType, match );
         }
-        return singleton == 1;
+        return match;
     }
 
     static boolean isContext( Class<?> leafType ) {
-        int hashCode = leafType.hashCode();
-        int singleton = isContextCache.get( hashCode );
-        if ( singleton == TYPE_UNDEF ) {
-            singleton = Context.class.isAssignableFrom( leafType ) ? 1 : -1;
-            isContextCache.put( hashCode, singleton );
+        Boolean match = isContextCache.get( leafType );
+        if ( match == null ) {
+            match = Context.class.isAssignableFrom( leafType );
+            isContextCache.put( leafType, match );
         }
-        return singleton == 1;
+        return match;
     }
 
     final Lazy findLazyByInstance( Object instance ) {
