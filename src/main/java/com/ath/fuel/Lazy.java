@@ -105,9 +105,12 @@ public class Lazy<T> {
         return lazy;
     }
 
+    /**
+     * expected use case here is that the parent was just ignited
+     */
     static final Lazy newEmptyParent( Object parent ) {
         Lazy lazy = new Lazy( parent.getClass() );
-        lazy.useWeakInstance = true;
+        lazy.useWeakInstance = true; // weak here because its expected that this parent was ignited
         lazy.setInstance( parent );
 
         if ( FuelInjector.isFragment( parent.getClass() ) ) {
@@ -164,6 +167,7 @@ public class Lazy<T> {
         }
     }
 
+    boolean onFueledCalled = false;
     Scope scope;
     boolean preProcessed = false;
     boolean postProcessed = false;
@@ -175,7 +179,7 @@ public class Lazy<T> {
     Class<?> leafType; // the type to be instantiated, not necessarily the type requested but some derivitive.
     boolean typeIsContext = false;
     boolean useWeakInstance = false;
-    T instance = null;
+    private T instance = null;
     private WeakReference<T> instanceRef; // for the cases we identify that we don't want to keep a strong ref to the instance
     private WeakReference<Context> contextRef;
     int contextHashCode = 0;
@@ -407,7 +411,7 @@ public class Lazy<T> {
                 // convenience for views in edit mode
                 if ( isInEditMode ) {
                     setInstance( type.newInstance() );
-                    return instance;
+                    return getInstance();
                 }
 
                 // If we guessed during attain and still

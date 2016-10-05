@@ -155,15 +155,31 @@ public abstract class FuelModule {
      */
     @CallSuper
     protected void onObtainNewSingleton( Object instance ) {
+    }
+
+    void doOnFueled( Lazy lazy, boolean ignite ) {
         try {
-            if ( instance instanceof OnFueled ) {
-                ( (OnFueled) instance ).onFueled();
+            // pre-conditions and exemptions
+            if ( lazy == null || lazy.getInstance() == null ) {
+                return;
+            } else if ( lazy.onFueledCalled ) {
+                return;
+            } else if ( !( lazy.getInstance() instanceof OnFueled ) ) {
+                return;
+            } else if ( ignite ) { // white-list ignites, ignoring singleton or reqInj
+                // continue
+            } else if ( FuelInjector.isSingleton( lazy.leafType ) ) { // TODO: could totally cache lazy.isSingleton ... later.
+                // continue
+            } else if ( !FuelInjector.isInjectionRequired( lazy.leafType ) ) {
+                // continue
             }
+
+            lazy.onFueledCalled = true;
+            ( (OnFueled) lazy.getInstance() ).onFueled();
         } catch ( Exception e ) {
             FLog.e( e );
         }
     }
-
 
     /**
      * Called when a critical failure occurs and Fuel is unable to recover.<br>
@@ -421,7 +437,7 @@ public abstract class FuelModule {
             // Second try provider map
             FuelProvider<?> provider = classToProviderMap.get( leafType );
             if ( provider != null ) {
-                lazy.instance = provider.provide( lazy, lazy.getParent() );
+                lazy.setInstance( provider.provide( lazy, lazy.getParent() ) );
                 if ( lazy.isDebug() ) {
                     FLog.leaveBreadCrumb( "obtainInstance provider provided instance for lazy - %s", lazy );
                 }
@@ -431,7 +447,7 @@ public abstract class FuelModule {
             // Third try class to class map
             Class<?> toType = classToClassMap.get( leafType );
             if ( toType != null ) {
-                lazy.instance = newInstance( lazy );
+                lazy.setInstance( newInstance( lazy ) );
                 if ( lazy.isDebug() ) {
                     FLog.leaveBreadCrumb( "obtainInstance classToClassMap found instance for lazy - %s", lazy );
                 }
@@ -439,7 +455,7 @@ public abstract class FuelModule {
             }
 
             if ( FuelInjector.isSingleton( leafType ) ) {
-                lazy.instance = newInstance( lazy );
+                lazy.setInstance( newInstance( lazy ) );
                 if ( lazy.isDebug() ) {
                     FLog.leaveBreadCrumb( "obtainInstance other/ActivitySingleton/AppSingleton new instance returned instance for lazy - %s", lazy );
                 }
@@ -448,7 +464,7 @@ public abstract class FuelModule {
 
             // Last (no mapping) and not special, try to instantiate the literal type they requested
             if ( allowAnonymousNewInstance ) {
-                lazy.instance = newInstance( lazy );
+                lazy.setInstance( newInstance( lazy ) );
                 if ( lazy.isDebug() ) {
                     FLog.leaveBreadCrumb( "obtainInstance allowAnonymousNewInstance new instance for lazy %s", lazy );
                 }
@@ -568,10 +584,11 @@ public abstract class FuelModule {
         }
         FuelInjector.doPostProcess( lazy );
 
+        doOnFueled( lazy, false );
         if ( FuelInjector.isSingleton( lazy.leafType ) ) { // TODO: could totally cache lazy.isSingleton ... later.
-            onObtainNewSingleton( lazy.instance );
+            onObtainNewSingleton( lazy.getInstance() );
         }
-        return lazy.instance;
+        return lazy.getInstance();
     }
 
     /**
