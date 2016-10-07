@@ -10,6 +10,10 @@ public class FLog {
         }
     }
 
+    public static final void t( String format, Object... objects ) {
+        aLogD( defaultPrefix() + String.format( format, objects ) + defaultPostfix() );
+    }
+
     public static final void d( String format, Object... objects ) {
         if ( FuelInjector.isDebug() ) {
             aLogD( defaultPrefix() + String.format( format, objects ) + defaultPostfix() );
