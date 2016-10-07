@@ -9,11 +9,11 @@ FAST, simple, easy to use and very easy to get started dependency injection fram
 # Fuel Submodule
 Clone the Fuel submodule under your project folder
 ```
-git submodule add -b release_1.0.1 git@github.com:aarontharris/Fuel.git Fuel
+git submodule add -b release_1.0.2 git@github.com:aarontharris/Fuel.git Fuel
 ```
 
 # Fuek Gradle
-```compile 'com.ath.fuel:Fuel:1.0.1'```
+```compile 'com.ath.fuel:Fuel:1.0.2'```
 
 # Quick Integration Tutorial
 [Youtube Fuel Tutorial](https://www.youtube.com/watch?v=CuWsEsSgPso)
