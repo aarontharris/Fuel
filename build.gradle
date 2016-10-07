@@ -17,7 +17,7 @@ version = '1.0.2'
 
 bintray {
     user = 'aarontharris'
-    key = 'asdfasfd'
+    key = System.getenv('BINTRAY_API_KEY')
     pkg {
         repo = 'maven'
         name = 'com.ath.fuel'
