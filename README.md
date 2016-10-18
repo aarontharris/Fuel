@@ -206,6 +206,26 @@ public class MyClass {
 }
 ```
 
+#### Injectable availability during construction
+
+By default, injectables are not available to the class during the class constructor.  When Fuel constructs an object, the object is not aware of Fuel until immediately after the constructor has finished.
+As shown above, Fuel supports constructures with injectables as constructor arguments.  This is one way to get access to injectables during the construction phase.  In this case Fuel is forced to do a recursive depth-first dependency evaluation to satisfy all the potential injectables and their constructors with injectables.
+
+Another option is to use the OnFueled interface like so:
+```
+public class MyClass implements OnFueled {
+  private final Lazy<SomeThing> someThing = Lazy.attain( this, SomeThing.class );
+
+  public MyClass() {
+  }
+  
+  @MainThread
+  @Override public void onFueled() {
+    someThing.get().doStuff();
+  }
+}
+```
+
 ### Providers
 Providers give you the opportunity to evaluate the injection situation.  A Provider is an abstract class with a provide method that gets called once per injection per type.  If the type is an AppSingleton, then the provider is only called once ever.  If type is an ActivitySingleton, the provider is called only once per Activity, Fragment, etc.  For POJOs the provider is called once per POJO.
 
