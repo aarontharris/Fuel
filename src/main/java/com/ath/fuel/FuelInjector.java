@@ -10,6 +10,7 @@ import android.content.Intent;
 import android.os.Bundle;
 import android.support.annotation.MainThread;
 import android.support.annotation.Nullable;
+import android.support.v4.app.Fragment;
 import android.support.v4.util.SparseArrayCompat;
 import android.view.View;
 
@@ -270,6 +271,18 @@ public final class FuelInjector {
         parentToLazies.put( instance, lazy );
     }
 
+    static final WeakHashMap<Object, Fragment> mMasq = new WeakHashMap<>();
+
+    /**
+     * Call before impersonator has been ignited
+     *
+     * @param impersonator
+     * @param impersonated
+     */
+    public static final void masqueradeAs( Object impersonator, Fragment impersonated ) {
+        mMasq.put( impersonator, impersonated );
+    }
+
     /**
      * Associates a context to the given instance so that its injections may find it in the dependency hierarchy.<br>
      * Also dequeues any injections that were queued up due to a context not being known at the time of Lazy.attain.<br>
@@ -306,28 +319,49 @@ public final class FuelInjector {
             // whatever this is we're igniting, it wasn't injected so lets artificially create a lazy for it
             // so that its children can find their parent
             //rememberContext( instance, context );
-            Lazy lazyInstance = injector.findLazyByInstance( instance );
-            if ( lazyInstance == null ) {
-                lazyInstance = Lazy.newEmptyParent( instance );
-            }
 
-            if ( !Lazy.isPreProcessed( lazyInstance ) ) {
-                doPreProcessParent( lazyInstance, context );
-            }
+            Object masq = mMasq.get( instance );
+            if ( masq == null ) {
+                boolean didInitNewInst = false;
+                Lazy lazyInstance = injector.findLazyByInstance( instance );
+                if ( lazyInstance == null ) {
+                    lazyInstance = Lazy.newEmptyParent( instance );
+                }
 
-            // In the case of a service, we need to plug it into the cache after it calls ignite because we cant construct it
-            if ( isService( instance.getClass() ) ) {
-                CacheKey key = CacheKey.attain( instance.getClass() );
-                injector.putObjectByContextType( lazyInstance, key, instance );
-            }
-            // Don't try to instantiate services
-            else {
-                if ( !Lazy.isPostProcessed( lazyInstance ) ) {
-                    getFuelModule().initializeNewInstance( lazyInstance );
+                if ( !Lazy.isPreProcessed( lazyInstance ) ) {
+                    doPreProcessParent( lazyInstance, context );
+                }
+
+                // In the case of a service, we need to plug it into the cache after it calls ignite because we cant construct it
+                if ( isService( instance.getClass() ) ) {
+                    CacheKey key = CacheKey.attain( instance.getClass() );
+                    injector.putObjectByContextType( lazyInstance, key, instance );
+                }
+                // Don't try to instantiate services
+                else {
+                    if ( !Lazy.isPostProcessed( lazyInstance ) ) {
+                        getFuelModule().initializeNewInstance( lazyInstance );
+                        didInitNewInst = true;
+                    }
+                }
+
+                // hacky :(
+                if ( !didInitNewInst ) {
+                    getFuelModule().doOnFueled( lazyInstance, true );
+                }
+            } else {
+                // more hacky -- make better later // FIXME: @aaronharris 6/7/17
+                Lazy lazyMasq = injector.findLazyByInstance( masq );
+
+                Collection<Lazy> queue = getPreprocessQueue( instance, true );
+                if ( queue.size() > 0 ) {
+                    for ( Lazy lazy : queue ) {
+                        lazy.setParent( lazyMasq.getInstance() );
+                        doPreProcessChild( lazy, lazyMasq );
+                    }
+                    queue.clear();
                 }
             }
-
-            getFuelModule().doOnFueled( lazyInstance, true );
         } catch ( Exception e ) {
             throw FuelInjector.doFailure( null, e );
         }

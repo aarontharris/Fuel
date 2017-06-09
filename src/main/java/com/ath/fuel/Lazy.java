@@ -4,6 +4,7 @@ import android.app.Service;
 import android.content.Context;
 import android.support.annotation.NonNull;
 import android.support.annotation.Nullable;
+import android.support.v4.app.Fragment;
 import android.view.View;
 
 import com.ath.fuel.err.FuelInjectionException;
@@ -146,6 +147,12 @@ public class Lazy<T> {
 
             if ( FuelInjector.isInitialized() ) {
                 // Hopefully this parent has been ignited already and we'll have a Lazy to show for it
+
+                Object mMasq = FuelInjector.mMasq.get( parent );
+                if ( mMasq != null ) {
+                    parent = mMasq;
+                }
+
                 lazyParent = FuelInjector.injector.findLazyByInstance( parent );
                 if ( Lazy.isPreProcessed( lazyParent ) ) {
                     context = (Context) lazyParent.contextRef.get(); // not sure why this cast is necessary? AndroidStudio fail?
@@ -205,6 +212,10 @@ public class Lazy<T> {
 
     void inheritScopeRef( Lazy parent ) {
         this.scopeObjectRef = parent.scopeObjectRef;
+    }
+
+    void setScopeObject( Fragment frag ) {
+        this.scopeObjectRef = new WeakReference<Object>( frag );
     }
 
     /**
@@ -447,6 +458,10 @@ public class Lazy<T> {
 
     Object getParent() {
         return parentRef == null ? null : parentRef.get();
+    }
+
+    void setParent( Object parent ) {
+        parentRef = new WeakReference<>( parent );
     }
 
     /**
