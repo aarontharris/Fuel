@@ -9,12 +9,8 @@ FAST, simple, easy to use and very easy to get started dependency injection fram
 # Fuel Submodule
 Clone the Fuel submodule under your project folder
 ```
-git submodule add -b release_1.0.2 git@github.com:aarontharris/Fuel.git Fuel
+git submodule add -b release_1.1.0 git@github.com:aarontharris/Fuel.git Fuel
 ```
-
-# Fuek Gradle
-```compile 'com.ath.fuel:Fuel:1.0.2'```
-
 # Quick Integration Tutorial
 [Youtube Fuel Tutorial](https://www.youtube.com/watch?v=CuWsEsSgPso)
 
@@ -202,6 +198,26 @@ public class MyClass {
   
   public MyClass( SomeThing arg ) {
     ...
+  }
+}
+```
+
+#### Injectable availability during construction
+
+By default, injectables are not available to the class during the class constructor.  When Fuel constructs an object, the object is not aware of Fuel until immediately after the constructor has finished.
+As shown above, Fuel supports constructures with injectables as constructor arguments.  This is one way to get access to injectables during the construction phase.  In this case Fuel is forced to do a recursive depth-first dependency evaluation to satisfy all the potential injectables and their constructors with injectables.
+
+Another option is to use the OnFueled interface like so:
+```
+public class MyClass implements OnFueled {
+  private final Lazy<SomeThing> someThing = Lazy.attain( this, SomeThing.class );
+
+  public MyClass() {
+  }
+  
+  @MainThread
+  @Override public void onFueled() {
+    someThing.get().doStuff();
   }
 }
 ```
