@@ -157,25 +157,17 @@ public abstract class FuelModule {
     protected void onObtainNewSingleton( Object instance ) {
     }
 
-    void doOnFueled( Lazy lazy, boolean ignite ) {
+    void doOnFueled( Lazy lazy ) {
         try {
             // pre-conditions and exemptions
             if ( lazy == null || lazy.getInstance() == null ) {
                 return;
             } else if ( lazy.onFueledCalled ) {
                 return;
-            } else if ( !( lazy.getInstance() instanceof OnFueled ) ) {
-                return;
-            } else if ( ignite ) { // white-list ignites, ignoring singleton or reqInj
-                // continue
-            } else if ( FuelInjector.isSingleton( lazy.leafType ) ) { // TODO: could totally cache lazy.isSingleton ... later.
-                // continue
-            } else if ( !FuelInjector.isInjectionRequired( lazy.leafType ) ) {
-                // continue
             }
 
+            FuelInjector.injector.processOnFueled( lazy.getInstance() );
             lazy.onFueledCalled = true;
-            ( (OnFueled) lazy.getInstance() ).onFueled();
         } catch ( Exception e ) {
             FLog.e( e );
         }
@@ -584,7 +576,7 @@ public abstract class FuelModule {
         }
         FuelInjector.doPostProcess( lazy );
 
-        doOnFueled( lazy, false );
+        doOnFueled( lazy );
         if ( FuelInjector.isSingleton( lazy.leafType ) ) { // TODO: could totally cache lazy.isSingleton ... later.
             onObtainNewSingleton( lazy.getInstance() );
         }

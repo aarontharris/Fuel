@@ -292,6 +292,10 @@ public final class FuelInjector {
      * One exception to this rule is that injections are always queued up until Fuel has been initialized.<br>
      */
     public static final void ignite( Context context, Object instance ) {
+        ignite( context, instance, null );
+    }
+
+    public static final void ignite( Context context, Object instance, OnFueled onFueled ) {
         try {
             if ( instance == null ) {
                 return;
@@ -347,7 +351,7 @@ public final class FuelInjector {
 
                 // hacky :(
                 if ( !didInitNewInst ) {
-                    getFuelModule().doOnFueled( lazyInstance, true );
+                    getFuelModule().doOnFueled( lazyInstance );
                 }
             } else {
                 // more hacky -- make better later // FIXME: @aaronharris 6/7/17
@@ -362,6 +366,8 @@ public final class FuelInjector {
                     queue.clear();
                 }
             }
+
+            subscribeOnFueled( instance, onFueled );
         } catch ( Exception e ) {
             throw FuelInjector.doFailure( null, e );
         }
@@ -857,6 +863,14 @@ public final class FuelInjector {
         return true;
     }
 
+    public static void flush( Object instance ) {
+        for ( Scope scope : injector.scopeCache.keySet() ) {
+            injector.scopeCache.remove( instance );
+        }
+        injector.lazyCache.remove( instance );
+        injector.preprocessQueue.remove( instance );
+    }
+
     private static long mainThreadId;
     private FuelModule fuelModule;
     //	private final WeakHashMap<Context, Map<CacheKey, Object>> cache = new WeakHashMap<>(); // context to injectable
@@ -869,6 +883,7 @@ public final class FuelInjector {
     private final Map<Scope, WeakHashMap<Object, Map<CacheKey, Object>>> scopeCache = new HashMap<>();
     private final WeakHashMap<Object, Queue<Lazy>> preprocessQueue = new WeakHashMap<>(); // LazyParent -> Queue<LazyChildren>
     private final Map<Object, WeakHashMap<Object, Lazy>> lazyCache = Collections.synchronizedMap( new WeakHashMap<Object, WeakHashMap<Object, Lazy>>() );
+    private final WeakHashMap<Object, OnFueled> mOnFueledCbs = new WeakHashMap<>();
 
     // map (not WeakReference of injectable)
     private final WeakHashMap<Context, WeakReference<Context>> contextToWeakContextCache = new WeakHashMap<Context, WeakReference<Context>>();
@@ -885,6 +900,27 @@ public final class FuelInjector {
             return injector.fuelModule;
         }
         return null;
+    }
+
+    public static void subscribeOnFueled( Object instance, OnFueled onFueled ) {
+        if ( onFueled != null ) {
+            Lazy lazy = injector.findLazyByInstance( instance );
+            if ( lazy != null && lazy.onFueledCalled ) {
+                onFueled.onFueled();
+            } else {
+                injector.mOnFueledCbs.put( instance, onFueled );
+            }
+        }
+    }
+
+    void processOnFueled( Object instance ) {
+        OnFueled callback = mOnFueledCbs.get( instance );
+        if ( callback != null ) {
+            callback.onFueled();
+            mOnFueledCbs.remove( instance );
+        } else if ( instance instanceof OnFueled ) {
+            ( (OnFueled) instance ).onFueled();
+        }
     }
 
     /**
