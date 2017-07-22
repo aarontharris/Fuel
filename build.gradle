@@ -15,34 +15,13 @@ apply plugin: 'com.github.dcendents.android-maven'
 group = 'com.ath.fuel'
 version = '1.0.2'
 
-bintray {
-    user = 'aarontharris'
-    key = 'asdfasfd'
-    pkg {
-        repo = 'maven'
-        name = 'com.ath.fuel'
-
-        version {
-            name = 'Fuel'
-            desc = 'Android Dependency Injection Framework'
-            released = new Date()
-            vcsTag = '1.0.2'
-        }
-
-        licenses = ['Apache-2.0']
-        vcsUrl = 'https://github.com/aarontharris/Fuel.git'
-        websiteUrl = 'https://github.com/aarontharris/Fuel'
-    }
-    configurations = ['archives']
-}
-
 android {
-    compileSdkVersion 24
-    buildToolsVersion "24.0.0"
+    compileSdkVersion 25
+    buildToolsVersion "25.0.0"
 
     defaultConfig {
         minSdkVersion 14
-        targetSdkVersion 24
+        targetSdkVersion 25
         versionCode 1
         versionName "1.0.2"
     }
@@ -56,7 +35,7 @@ android {
 
 dependencies {
     compile fileTree(dir: 'libs', include: ['*.jar'])
-    compile 'com.android.support:appcompat-v7:24.0.0'
+    compile 'com.android.support:appcompat-v7:25.3.1'
 }
 
 task generateSourcesJar(type: Jar) {
