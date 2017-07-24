@@ -10,7 +10,6 @@ import android.content.Intent;
 import android.os.Bundle;
 import android.support.annotation.MainThread;
 import android.support.annotation.Nullable;
-import android.support.v4.util.SparseArrayCompat;
 import android.view.View;
 
 import com.ath.fuel.err.FuelInjectionException;
@@ -43,7 +42,8 @@ public final class FuelInjector {
 
     private static boolean isDebug = false;
     private static final ReentrantReadWriteLock cacheLock = new ReentrantReadWriteLock();
-    private static final SparseArrayCompat<Class> leafTypeCache = new SparseArrayCompat<>();
+    //private static final SparseArrayCompat<Class> leafTypeCache = new SparseArrayCompat<>(); // causing collisions
+    private static final Map<Class, Class> leafTypeCache = new HashMap<>();
     private static final Map<Class, Boolean> isAppSingletonCache = new HashMap<>();
     private static final Map<Class, Boolean> isSingletonCache = new HashMap<>();
     private static final Map<Class, Boolean> isActSingletonCache = new HashMap<>();
@@ -137,10 +137,10 @@ public final class FuelInjector {
 
     static final <T> Class<? extends T> toLeafType( Class<T> type, Integer flavor ) {
         if ( flavor == null ) {
-            Class leafType = leafTypeCache.get( type.hashCode() );
+            Class leafType = leafTypeCache.get( type );
             if ( leafType == null ) {
                 leafType = injector.fuelModule.getType( type, null );
-                leafTypeCache.put( type.hashCode(), leafType );
+                leafTypeCache.put( type, leafType );
             }
             return leafType;
         }
