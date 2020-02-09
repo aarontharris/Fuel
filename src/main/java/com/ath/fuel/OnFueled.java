@@ -1,6 +1,6 @@
 package com.ath.fuel;
 
-import android.support.annotation.MainThread;
+import androidx.annotation.MainThread;
 
 /**
  * Implement this interface to receive a callback immediately after fuel injections have completed.
