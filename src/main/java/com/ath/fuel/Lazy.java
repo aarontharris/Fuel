@@ -6,7 +6,6 @@ import android.view.View;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
-import androidx.fragment.app.Fragment;
 
 import com.ath.fuel.err.FuelInjectionException;
 import com.ath.fuel.err.FuelUnableToObtainContextException;
@@ -148,12 +147,6 @@ public class Lazy<T> {
 
             if (FuelInjector.isInitialized()) {
                 // Hopefully this parent has been ignited already and we'll have a Lazy to show for it
-
-                Object mMasq = FuelInjector.mMasq.get(parent);
-                if (mMasq != null) {
-                    parent = mMasq;
-                }
-
                 lazyParent = FuelInjector.getFuelModule().findLazyByInstance(parent);
                 if (Lazy.isPreProcessed(lazyParent)) {
                     context = (Context) lazyParent.contextRef.get(); // not sure why this cast is necessary? AndroidStudio fail?
@@ -215,10 +208,6 @@ public class Lazy<T> {
         this.scopeObjectRef = parent.scopeObjectRef;
     }
 
-    void setScopeObject(Fragment frag) {
-        this.scopeObjectRef = new WeakReference<Object>(frag);
-    }
-
     /**
      * Some scopes are consolidated into a shared cache use this to get the cacheScope based on the literal scope
      *
@@ -228,7 +217,6 @@ public class Lazy<T> {
         switch (scope) {
             case Application:
             case Activity:
-            case Fragment:
                 return scope;
         }
         return null;
@@ -245,9 +233,6 @@ public class Lazy<T> {
                 case Application:
                 case Activity:
                     scopeObject = getContext();
-                    break;
-                case Fragment:
-                    scopeObject = scopeObjectRef == null ? null : scopeObjectRef.get();
                     break;
             }
         }
@@ -358,13 +343,6 @@ public class Lazy<T> {
      */
     public boolean isActivitySingleton() {
         return FuelInjector.isActivitySingleton(leafType);
-    }
-
-    /**
-     * @throws NullPointerException when {@link #getLeafType()} is unavailable
-     */
-    public boolean isFragmentSingleton() {
-        return FuelInjector.isFragmentSingleton(leafType);
     }
 
     /**

@@ -13,7 +13,6 @@ import android.view.View;
 import androidx.annotation.MainThread;
 import androidx.annotation.Nullable;
 import androidx.collection.SparseArrayCompat;
-import androidx.fragment.app.Fragment;
 
 import com.ath.fuel.err.FuelInjectionException;
 import com.ath.fuel.err.FuelInvalidParentException;
@@ -165,19 +164,10 @@ public final class FuelInjector {
         return singleton;
     }
 
-    static final boolean isFragmentSingleton(Class<?> leafType) {
-        Boolean singleton = isFragSingletonCache.get(leafType);
-        if (singleton == null) {
-            singleton = leafType.isAnnotationPresent(FragmentSingleton.class);
-            isFragSingletonCache.put(leafType, singleton);
-        }
-        return singleton;
-    }
-
     static final boolean isSingleton(Class<?> leafType) {
         Boolean singleton = isSingletonCache.get(leafType);
         if (singleton == null) {
-            singleton = (isAppSingleton(leafType) || isActivitySingleton(leafType) || isFragmentSingleton(leafType));
+            singleton = (isAppSingleton(leafType) || isActivitySingleton(leafType));
             isSingletonCache.put(leafType, singleton);
         }
         return singleton;
@@ -237,19 +227,6 @@ public final class FuelInjector {
         return match;
     }
 
-
-    static final WeakHashMap<Object, Fragment> mMasq = new WeakHashMap<>();
-
-    /**
-     * Call before impersonator has been ignited
-     *
-     * @param impersonator
-     * @param impersonated
-     */
-    public static final void masqueradeAs(Object impersonator, Fragment impersonated) {
-        mMasq.put(impersonator, impersonated);
-    }
-
     /**
      * Associates a context to the given instance so that its injections may find it in the dependency hierarchy.<br>
      * Also dequeues any injections that were queued up due to a context not being known at the time of Lazy.attain.<br>
@@ -283,51 +260,32 @@ public final class FuelInjector {
             // skip wrappers
             context = toContext(context);
 
-            // whatever this is we're igniting, it wasn't injected so lets artificially create a lazy for it
-            // so that its children can find their parent
-            //rememberContext( instance, context );
+            boolean didInitNewInst = false;
+            Lazy lazyInstance = injector.fuelModule.findLazyByInstance(instance);
+            if (lazyInstance == null) {
+                lazyInstance = Lazy.newEmptyParent(instance);
+            }
 
-            Object masq = mMasq.get(instance);
-            if (masq == null) {
-                boolean didInitNewInst = false;
-                Lazy lazyInstance = injector.fuelModule.findLazyByInstance(instance);
-                if (lazyInstance == null) {
-                    lazyInstance = Lazy.newEmptyParent(instance);
-                }
+            if (!Lazy.isPreProcessed(lazyInstance)) {
+                doPreProcessParent(lazyInstance, context);
+            }
 
-                if (!Lazy.isPreProcessed(lazyInstance)) {
-                    doPreProcessParent(lazyInstance, context);
+            // In the case of a service, we need to plug it into the cache after it calls ignite because we cant construct it
+            if (isService(instance.getClass())) {
+                CacheKey key = CacheKey.attain(instance.getClass());
+                injector.putObjectByContextType(lazyInstance, key, instance);
+            }
+            // Don't try to instantiate services
+            else {
+                if (!Lazy.isPostProcessed(lazyInstance)) {
+                    getFuelModule().initializeNewInstance(lazyInstance);
+                    didInitNewInst = true;
                 }
+            }
 
-                // In the case of a service, we need to plug it into the cache after it calls ignite because we cant construct it
-                if (isService(instance.getClass())) {
-                    CacheKey key = CacheKey.attain(instance.getClass());
-                    injector.putObjectByContextType(lazyInstance, key, instance);
-                }
-                // Don't try to instantiate services
-                else {
-                    if (!Lazy.isPostProcessed(lazyInstance)) {
-                        getFuelModule().initializeNewInstance(lazyInstance);
-                        didInitNewInst = true;
-                    }
-                }
-
-                // hacky :(
-                if (!didInitNewInst) {
-                    getFuelModule().doOnFueled(lazyInstance, true);
-                }
-            } else {
-                // more hacky -- make better later // FIXME: @aaronharris 6/7/17
-                Lazy lazyMasq = injector.fuelModule.findLazyByInstance(masq);
-
-                Collection<Lazy> queue = getPreprocessQueue(instance, true);
-                if (queue.size() > 0) {
-                    for (Lazy lazy : queue) {
-                        lazy.setParent(lazyMasq.getInstance());
-                        doPreProcessChild(lazy, lazyMasq);
-                    }
-                    queue.clear();
-                }
+            // hacky :(
+            if (!didInitNewInst) {
+                getFuelModule().doOnFueled(lazyInstance, true);
             }
         } catch (Exception e) {
             throw FuelInjector.doFailure(null, e);
@@ -464,11 +422,7 @@ public final class FuelInjector {
     static Scope determineScope(Class leafType) {
         if (leafType != null) {
             // ordered by precedence
-            if (isFragmentSingleton(leafType)) {
-                return Scope.Fragment;
-            } else if (isFragment(leafType)) {
-                return Scope.Fragment;
-            } else if (isActivitySingleton(leafType)) {
+            if (isActivitySingleton(leafType)) {
                 return Scope.Activity;
             } else if (isActivity(leafType)) {
                 return Scope.Activity;
@@ -636,10 +590,6 @@ public final class FuelInjector {
                 FLog.leaveBreadCrumb("getInstance for App got %s", getApp() == null ? "null" : getApp().getClass().getSimpleName());
             }
             return (T) getApp();
-        } else if (isFragment(key.getLeafType())) {
-            //WeakReference fragRef = lazy.getScopeObjectRef();
-            //return (T) ( fragRef == null ? null : fragRef.get() );
-            return (T) lazy.toObjectScope();
         } else if (isActivity(key.getLeafType()) && context instanceof Activity) {
             if (debug) {
                 FLog.leaveBreadCrumb("getInstance for Activity got %s", context == null ? "null" : context.getClass().getSimpleName());
