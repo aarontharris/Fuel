@@ -71,66 +71,37 @@ public abstract class FuelModule {
 
     /* package private */
     Application.ActivityLifecycleCallbacks localLifecycleCallbacks;
-    Application.ActivityLifecycleCallbacks externalLifecycleCallbacks;
 
     public FuelModule(Application app) {
         this.app = app;
 
         localLifecycleCallbacks = new Application.ActivityLifecycleCallbacks() {
-            @Override
-            public void onActivityCreated(Activity activity, Bundle savedInstanceState) {
-                if (externalLifecycleCallbacks != null) {
-                    externalLifecycleCallbacks.onActivityCreated(activity, savedInstanceState);
-                }
+            @Override public void onActivityCreated(@NonNull Activity activity, Bundle savedInstanceState) {
                 FuelModule.this.onActivityCreated(activity, savedInstanceState);
             }
 
-            @Override
-            public void onActivityStarted(Activity activity) {
-                if (externalLifecycleCallbacks != null) {
-                    externalLifecycleCallbacks.onActivityStarted(activity);
-                }
+            @Override public void onActivityStarted(@NonNull Activity activity) {
                 FuelModule.this.onActivityStarted(activity);
             }
 
-            @Override
-            public void onActivityResumed(Activity activity) {
-                if (externalLifecycleCallbacks != null) {
-                    externalLifecycleCallbacks.onActivityResumed(activity);
-                }
+            @Override public void onActivityResumed(@NonNull Activity activity) {
                 FuelModule.this.onActivityResumed(activity);
             }
 
-            @Override
-            public void onActivityPaused(Activity activity) {
+            @Override public void onActivityPaused(@NonNull Activity activity) {
                 FuelModule.this.onActivityPaused(activity);
-                if (externalLifecycleCallbacks != null) {
-                    externalLifecycleCallbacks.onActivityPaused(activity);
-                }
             }
 
-            @Override
-            public void onActivityStopped(Activity activity) {
+            @Override public void onActivityStopped(@NonNull Activity activity) {
                 FuelModule.this.onActivityStopped(activity);
-                if (externalLifecycleCallbacks != null) {
-                    externalLifecycleCallbacks.onActivityStopped(activity);
-                }
             }
 
-            @Override
-            public void onActivitySaveInstanceState(Activity activity, Bundle outState) {
+            @Override public void onActivitySaveInstanceState(@NonNull Activity activity, @NonNull Bundle outState) {
                 FuelModule.this.onActivitySaveInstanceState(activity, outState);
-                if (externalLifecycleCallbacks != null) {
-                    externalLifecycleCallbacks.onActivitySaveInstanceState(activity, outState);
-                }
             }
 
-            @Override
-            public void onActivityDestroyed(Activity activity) {
+            @Override public void onActivityDestroyed(@NonNull Activity activity) {
                 FuelModule.this.onActivityDestroyed(activity);
-                if (externalLifecycleCallbacks != null) {
-                    externalLifecycleCallbacks.onActivityDestroyed(activity);
-                }
             }
         };
         app.registerActivityLifecycleCallbacks(localLifecycleCallbacks);
@@ -160,9 +131,6 @@ public abstract class FuelModule {
     void prepareForDeath() {
         if (localLifecycleCallbacks != null) {
             app.unregisterActivityLifecycleCallbacks(localLifecycleCallbacks);
-        }
-        if (externalLifecycleCallbacks != null) {
-            app.unregisterActivityLifecycleCallbacks(externalLifecycleCallbacks);
         }
     }
 
@@ -478,19 +446,6 @@ public abstract class FuelModule {
 
     Application getApplication() {
         return app;
-    }
-
-    /**
-     * Unregisters old callbacks if any
-     *
-     * @param lifecycleCallbacks
-     */
-    void setActivityCallbacks(Application.ActivityLifecycleCallbacks lifecycleCallbacks) {
-        if (this.externalLifecycleCallbacks != null) {
-            app.unregisterActivityLifecycleCallbacks(this.externalLifecycleCallbacks);
-        }
-
-        this.externalLifecycleCallbacks = lifecycleCallbacks;
     }
 
     // FIXME: consider other mappings above
