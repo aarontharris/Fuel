@@ -383,7 +383,7 @@ public final class FuelInjector {
             lazyContext = getApp();
         }
 
-        lazy.setContext(lazyContext, false);
+        lazy.setContext(lazyContext);
         lazy.preProcessed = true;
     }
 
