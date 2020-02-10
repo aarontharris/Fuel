@@ -66,8 +66,11 @@ public abstract class FuelModule {
     private final HashMap<Class<?>, Class<?>> classToClassMap = new HashMap<>();
     private final HashMap<Class<?>, Object> classToObjectMap = new HashMap<>();
     private final HashMap<Class<?>, FuelProvider> classToProviderMap = new HashMap<>();
-    private final List<FuelModule> submodules = new CopyOnWriteArrayList<>();
     private Application app;
+
+    private final @NonNull List<FuelModule> submodules = new CopyOnWriteArrayList<>(); // FIXME: Submodule - WeakRef
+    private @Nullable FuelModule parent = null; // FIXME: Submodule - WeakRef
+
 
     /* package private */
     Application.ActivityLifecycleCallbacks localLifecycleCallbacks;
@@ -165,7 +168,14 @@ public abstract class FuelModule {
     }
 
     void addSubModule(@NonNull FuelModule module) {
-        this.submodules.add(module);
+        this.submodules.add(module); // FIXME: Submodule - WeakRef
+        module.parent = this; // FIXME: Submodule - WeakRef
+    }
+
+    void remSubmodule(@NonNull FuelModule module) {
+        this.submodules.remove(module);
+        module.parent = null;
+        // FIXME: Submodule - destroy all children
     }
 
     /**
