@@ -23,8 +23,12 @@ import com.ath.fuel.err.FuelInjectionException;
 import com.ath.fuel.err.FuelUnableToObtainInstanceException;
 
 import java.lang.reflect.Constructor;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.WeakHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 
 public abstract class FuelModule {
@@ -50,6 +54,14 @@ public abstract class FuelModule {
          */
         T provide(Lazy lazy, Object parent);
     }
+
+    // Scope -> ScopeObject -> CacheKey -> instance
+    // - Scope is Application, Activity, Fragment, etc
+    // - ScopeObject would be the context, or the fragment, paired to the scope
+    // - CacheKey describes the instance we're looking for
+    // - instance the hidden treasure
+    private final Map<Scope, WeakHashMap<Object, Map<CacheKey, Object>>> scopeCache = new HashMap<>();
+    private final Map<Object, WeakHashMap<Object, Lazy>> lazyCache = Collections.synchronizedMap(new WeakHashMap<Object, WeakHashMap<Object, Lazy>>());
 
     private final HashMap<Class<?>, Class<?>> classToClassMap = new HashMap<>();
     private final HashMap<Class<?>, Object> classToObjectMap = new HashMap<>();
@@ -124,6 +136,27 @@ public abstract class FuelModule {
         app.registerActivityLifecycleCallbacks(localLifecycleCallbacks);
     }
 
+    /*
+
+    I'm thinking we support nested modules.
+
+    When I request an injectable, I start from the nearest module relative to me in the tree.
+    I check for a match, and bubble my way up the tree until I find it, or I reach the limit of my scope.
+
+    The tree should be deterministic by the View Tree? This could create problems for tests.
+    Solution: We only use the view tree to provide the initial module, from there the modules should be aware.
+
+    So:
+    A view searches up the view tree and finds a parent fragment has a module associated with it.
+    We then check that module for a matching injectable.
+    If that module can't find a match, it looks up it's known ancestors until a match is found or scope ends.
+
+     */
+
+    FuelModule(@NonNull FuelModule parent) { // FIXME: Submodule
+        parent.addSubModule(this);
+    }
+
     void prepareForDeath() {
         if (localLifecycleCallbacks != null) {
             app.unregisterActivityLifecycleCallbacks(localLifecycleCallbacks);
@@ -163,7 +196,7 @@ public abstract class FuelModule {
         return lazy.getInstance();
     }
 
-    public void addSubModule(@NonNull FuelModule module) {
+    void addSubModule(@NonNull FuelModule module) {
         this.submodules.add(module);
     }
 
@@ -472,7 +505,7 @@ public abstract class FuelModule {
     /**
      * Get an instance based on the FuelModule configure map and the given type
      */
-    Object obtainInstance(Lazy lazy, boolean allowAnonymousNewInstance) throws FuelInjectionException {
+    Object obtainInstance(Lazy lazy, boolean allowAnonymousNewInstance) throws FuelInjectionException {// FIXME: Submodule
         try {
             Class<?> leafType = lazy.leafType;
 
@@ -534,7 +567,7 @@ public abstract class FuelModule {
         if (lazy.isDebug()) {
             FLog.leaveBreadCrumb("obtainInstance fell through to return null");
         }
-        return null; // FIXME: probably shouldn't ever return null? probably throw?
+        return null; // Null eventually gets caught by Lazy.get() and throws... meh...
     }
 
     /**
@@ -683,7 +716,8 @@ public abstract class FuelModule {
      * @param <T>
      * @return
      */
-    static <T> Class<? extends T> getType(FuelModule module, Class<T> baseType, Integer flavor) { // Must stay logically paired with obtainInstance -- not super cool but ... for now.
+    // Must stay logically paired with obtainInstance -- not super cool but ... for now.
+    static <T> Class<? extends T> getType(FuelModule module, Class<T> baseType, Integer flavor) { // FIXME: Submodule
         Object obj = module.classToObjectMap.get(baseType);
         if (obj != null) {
             return (Class<? extends T>) obj.getClass();
@@ -702,4 +736,69 @@ public abstract class FuelModule {
         return baseType;
     }
 
+    /**
+     * @param primeTheCacheEntry if true, an empty entry will be added for this context if not already present, false leaves it alone and returns
+     *                           empty
+     * @return an "immutable" map when primeTheCachEntry = false :/ meh
+     */
+    Map<CacheKey, Object> getCacheByContextNotThreadSafe(Lazy lazy, boolean primeTheCacheEntry) { // FIXME: Submodule
+        Map<CacheKey, Object> contextCache = null;
+        Scope cacheScope = lazy.toCacheScope();
+        Object scopeObject = lazy.toObjectScope();
+
+        // if either are null then this lazy is not cacheable
+        if (cacheScope != null && scopeObject != null) {
+            WeakHashMap<Object, Map<CacheKey, Object>> cache = scopeCache.get(cacheScope);
+            if (cache == null) {
+                cache = new WeakHashMap<>();
+                scopeCache.put(cacheScope, cache);
+            }
+
+            contextCache = cache.get(scopeObject);
+            if (contextCache == null) {
+                if (primeTheCacheEntry) {
+                    contextCache = new HashMap<>();
+                    cache.put(scopeObject, contextCache);
+                }
+            }
+        }
+
+        // Shouldn't be able to prime the cache if not cacheable -- but potential fail
+        if (contextCache == null) {
+            contextCache = Collections.emptyMap();
+        }
+        return contextCache;
+    }
+
+    final void rememberLazyByInstance(Object instance, Lazy lazy) {// FIXME: Submodule
+        Object scopeObject = lazy.toObjectScope();
+        if (scopeObject == null) {
+            scopeObject = lazy.getContext();
+        }
+        WeakHashMap<Object, Lazy> parentToLazies = lazyCache.get(scopeObject);
+        if (parentToLazies == null) {
+            parentToLazies = new WeakHashMap<>();
+            lazyCache.put(scopeObject, parentToLazies);
+        }
+        parentToLazies.put(instance, lazy);
+    }
+
+    final Lazy findLazyByInstance(Object instance) {// FIXME: Submodule
+        // work-around for WeakHashMap Iterators being fast-fail
+        List<Object> scopedObjects = new ArrayList<>(lazyCache.keySet());
+
+        //for ( Object scopeObject : injector.lazyCache.keySet() ) {
+        for (Object scopeObject : scopedObjects) {
+            if (scopeObject != null) {
+                WeakHashMap<Object, Lazy> parentToLazies = lazyCache.get(scopeObject);
+                if (parentToLazies != null) {
+                    Lazy lazy = parentToLazies.get(instance);
+                    if (lazy != null) {
+                        return lazy;
+                    }
+                }
+            }
+        }
+        return null;
+    }
 }

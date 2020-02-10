@@ -21,12 +21,10 @@ import com.ath.fuel.err.FuelScopeViolationException;
 import com.ath.fuel.err.FuelUnableToObtainContextException;
 
 import java.lang.ref.WeakReference;
-import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.LinkedList;
-import java.util.List;
 import java.util.Map;
 import java.util.Queue;
 import java.util.WeakHashMap;
@@ -239,38 +237,6 @@ public final class FuelInjector {
         return match;
     }
 
-    final Lazy findLazyByInstance(Object instance) {
-        // work-around for WeakHashMap Iterators being fast-fail
-        List<Object> scopedObjects = new ArrayList<>(injector.lazyCache.keySet());
-
-        //for ( Object scopeObject : injector.lazyCache.keySet() ) {
-        for (Object scopeObject : scopedObjects) {
-            if (scopeObject != null) {
-                WeakHashMap<Object, Lazy> parentToLazies = injector.lazyCache.get(scopeObject);
-                if (parentToLazies != null) {
-                    Lazy lazy = parentToLazies.get(instance);
-                    if (lazy != null) {
-                        return lazy;
-                    }
-                }
-            }
-        }
-        return null;
-    }
-
-
-    final void rememberLazyByInstance(Object instance, Lazy lazy) {
-        Object scopeObject = lazy.toObjectScope();
-        if (scopeObject == null) {
-            scopeObject = lazy.getContext();
-        }
-        WeakHashMap<Object, Lazy> parentToLazies = injector.lazyCache.get(scopeObject);
-        if (parentToLazies == null) {
-            parentToLazies = new WeakHashMap<>();
-            injector.lazyCache.put(scopeObject, parentToLazies);
-        }
-        parentToLazies.put(instance, lazy);
-    }
 
     static final WeakHashMap<Object, Fragment> mMasq = new WeakHashMap<>();
 
@@ -324,7 +290,7 @@ public final class FuelInjector {
             Object masq = mMasq.get(instance);
             if (masq == null) {
                 boolean didInitNewInst = false;
-                Lazy lazyInstance = injector.findLazyByInstance(instance);
+                Lazy lazyInstance = injector.fuelModule.findLazyByInstance(instance);
                 if (lazyInstance == null) {
                     lazyInstance = Lazy.newEmptyParent(instance);
                 }
@@ -352,7 +318,7 @@ public final class FuelInjector {
                 }
             } else {
                 // more hacky -- make better later // FIXME: @aaronharris 6/7/17
-                Lazy lazyMasq = injector.findLazyByInstance(masq);
+                Lazy lazyMasq = injector.fuelModule.findLazyByInstance(masq);
 
                 Collection<Lazy> queue = getPreprocessQueue(instance, true);
                 if (queue.size() > 0) {
@@ -539,7 +505,7 @@ public final class FuelInjector {
         if (FuelInjector.isDebug()) {
             FLog.leaveBreadCrumb("post-process %s", lazy);
         }
-        injector.rememberLazyByInstance(lazy.getInstance(), lazy);
+        injector.fuelModule.rememberLazyByInstance(lazy.getInstance(), lazy);
         lazy.postProcessed = true; // before processing queue bcuz this lazy is done and its children should consider it done
         dequeuePreProcesses(lazy);
     }
@@ -860,19 +826,13 @@ public final class FuelInjector {
 
     private static long mainThreadId;
     private FuelModule fuelModule;
-    //	private final WeakHashMap<Context, Map<CacheKey, Object>> cache = new WeakHashMap<>(); // context to injectable
-
-    // Scope -> ScopeObject -> CacheKey -> instance
-    // - Scope is Application, Activity, Fragment, etc
-    // - ScopeObject would be the context, or the fragment, paired to the scope
-    // - CacheKey describes the instance we're looking for
-    // - instance the hidden treasure
-    private final Map<Scope, WeakHashMap<Object, Map<CacheKey, Object>>> scopeCache = new HashMap<>();
     private final WeakHashMap<Object, Queue<Lazy>> preprocessQueue = new WeakHashMap<>(); // LazyParent -> Queue<LazyChildren>
-    private final Map<Object, WeakHashMap<Object, Lazy>> lazyCache = Collections.synchronizedMap(new WeakHashMap<Object, WeakHashMap<Object, Lazy>>());
+    //	private final WeakHashMap<Context, Map<CacheKey, Object>> cache = new WeakHashMap<>(); // context to injectable
 
     // map (not WeakReference of injectable)
     private final WeakHashMap<Context, WeakReference<Context>> contextToWeakContextCache = new WeakHashMap<Context, WeakReference<Context>>();
+
+
     static final long startTimeMillis = System.currentTimeMillis();
 
     private FuelInjector() {
@@ -888,39 +848,6 @@ public final class FuelInjector {
         return null;
     }
 
-    /**
-     * @param primeTheCacheEntry if true, an empty entry will be added for this context if not already present, false leaves it alone and returns
-     *                           empty
-     * @return an "immutable" map when primeTheCachEntry = false :/ meh
-     */
-    private Map<CacheKey, Object> getCacheByContextNotThreadSafe(Lazy lazy, boolean primeTheCacheEntry) {
-        Map<CacheKey, Object> contextCache = null;
-        Scope cacheScope = lazy.toCacheScope();
-        Object scopeObject = lazy.toObjectScope();
-
-        // if either are null then this lazy is not cacheable
-        if (cacheScope != null && scopeObject != null) {
-            WeakHashMap<Object, Map<CacheKey, Object>> cache = scopeCache.get(cacheScope);
-            if (cache == null) {
-                cache = new WeakHashMap<>();
-                scopeCache.put(cacheScope, cache);
-            }
-
-            contextCache = cache.get(scopeObject);
-            if (contextCache == null) {
-                if (primeTheCacheEntry) {
-                    contextCache = new HashMap<>();
-                    cache.put(scopeObject, contextCache);
-                }
-            }
-        }
-
-        // Shouldn't be able to prime the cache if not cacheable -- but potential fail
-        if (contextCache == null) {
-            contextCache = Collections.emptyMap();
-        }
-        return contextCache;
-    }
 
     // FIXME: only call if isSingleton !
 
@@ -928,7 +855,7 @@ public final class FuelInjector {
         Lock lock = cacheLock.readLock();
         try {
             lock.lock();
-            Map<CacheKey, Object> contextCache = getCacheByContextNotThreadSafe(lazy, false);
+            Map<CacheKey, Object> contextCache = fuelModule.getCacheByContextNotThreadSafe(lazy, false);
             Object obj = contextCache.get(key);
             return obj;
         } finally {
@@ -943,7 +870,7 @@ public final class FuelInjector {
         Lock lock = cacheLock.writeLock();
         try {
             lock.lock();
-            Map<CacheKey, Object> contextCache = getCacheByContextNotThreadSafe(lazy, true);
+            Map<CacheKey, Object> contextCache = fuelModule.getCacheByContextNotThreadSafe(lazy, true);
             contextCache.put(key, value);
         } finally {
             lock.unlock();
@@ -951,6 +878,7 @@ public final class FuelInjector {
     }
 
     public static void debugInjectionGraph() {
+        /*
         try {
             FLog.dSimple("####");
             FLog.dSimple("####");
@@ -996,6 +924,7 @@ public final class FuelInjector {
         } catch (Exception e) {
             FLog.e(e, "Failure while logging injection graph");
         }
+         */
     }
 
 }

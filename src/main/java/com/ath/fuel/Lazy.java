@@ -154,7 +154,7 @@ public class Lazy<T> {
                     parent = mMasq;
                 }
 
-                lazyParent = FuelInjector.injector.findLazyByInstance(parent);
+                lazyParent = FuelInjector.getFuelModule().findLazyByInstance(parent);
                 if (Lazy.isPreProcessed(lazyParent)) {
                     context = (Context) lazyParent.contextRef.get(); // not sure why this cast is necessary? AndroidStudio fail?
 
@@ -441,9 +441,11 @@ public class Lazy<T> {
                             + FLog.getSimpleName(elem) + "@" + elem.getLineNumber());
                 }
 
-                setInstance(FuelInjector.attainInstance(CacheKey.attain(this), this, true));
-                if (getInstance() == null) {
+                T instance = FuelInjector.attainInstance(CacheKey.attain(this), this, true);
+                if (instance == null) {
                     throw new FuelInjectionException("Unable to obtain instance: %s", this);
+                } else {
+                    setInstance(instance);
                 }
             }
         } catch (FuelInjectionException e) {
