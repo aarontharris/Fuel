@@ -71,7 +71,7 @@ abstract class FuelSubModule { // TODO
      */
     protected @Nullable <T> T onInstanceUnattainable(@NonNull Lazy<T> lazy) {
         FLog.w("Fuel is forced to use reflection to obtain: '"
-                + lazy.leafType
+                + lazy.getLeafType()
                 + "'. This is because no mapping has been provided. " +
                 "For more info see FuelModule.onInstanceUnattainable()");
 

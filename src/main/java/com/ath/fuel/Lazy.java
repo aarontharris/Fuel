@@ -223,7 +223,7 @@ public final class Lazy<T> {
                 throw FuelInjector.doFailure(this, new FuelUnableToObtainContextException("Never Ignited " + this));
             }
 
-            if (FuelInjector.isAppSingleton(leafType)) {
+            if (FuelInjector.isAppSingleton(getLeafType())) {
                 context = FuelInjector.getApp();
                 setContext(context);
             }
@@ -262,21 +262,21 @@ public final class Lazy<T> {
      * @throws NullPointerException when {@link #getLeafType()} is unavailable
      */
     public boolean isAppSingleton() {
-        return FuelInjector.isAppSingleton(leafType);
+        return FuelInjector.isAppSingleton(getLeafType());
     }
 
     /**
      * @throws NullPointerException when {@link #getLeafType()} is unavailable
      */
     public boolean isActivitySingleton() {
-        return FuelInjector.isActivitySingleton(leafType);
+        return FuelInjector.isActivitySingleton(getLeafType());
     }
 
     /**
      * @throws NullPointerException when {@link #getLeafType()} is unavailable
      */
     public boolean isSingleton() {
-        return FuelInjector.isSingleton(leafType);
+        return FuelInjector.isSingleton(getLeafType());
     }
 
     public final Integer getFlavor() {
@@ -390,7 +390,7 @@ public final class Lazy<T> {
 
             return String.format("Lazy[type='%s', leafType='%s', flavor='%s', instance='%s', context='%s'",
                     (type == null ? null : type.getSimpleName()),
-                    (leafType == null ? null : leafType.getSimpleName()),
+                    (getLeafType() == null ? null : getLeafType().getSimpleName()),
                     flavor,
                     instanceStr,
                     contextStr

@@ -223,7 +223,7 @@ public abstract class FuelModule {
      */
     protected @Nullable <T> T onInstanceUnattainable(@NonNull Lazy<T> lazy) {
         FLog.w("Fuel is forced to use reflection to obtain: '"
-                + lazy.leafType
+                + lazy.getLeafType()
                 + "'. This is because no mapping has been provided. " +
                 "For more info see FuelModule.onInstanceUnattainable()");
 
@@ -242,9 +242,9 @@ public abstract class FuelModule {
                 return;
             } else if (ignite) { // white-list ignites, ignoring singleton or reqInj
                 // continue
-            } else if (FuelInjector.isSingleton(lazy.leafType)) { // TODO: could totally cache lazy.isSingleton ... later.
+            } else if (FuelInjector.isSingleton(lazy.getLeafType())) { // TODO: could totally cache lazy.isSingleton ... later.
                 // continue
-            } else if (!FuelInjector.isInjectionRequired(lazy.leafType)) {
+            } else if (!FuelInjector.isInjectionRequired(lazy.getLeafType())) {
                 // continue
             }
 
@@ -507,7 +507,7 @@ public abstract class FuelModule {
      */
     Object obtainInstance(Lazy lazy, boolean allowAnonymousNewInstance) throws FuelInjectionException {// FIXME: Submodule
         try {
-            Class<?> leafType = lazy.leafType;
+            Class<?> leafType = lazy.getLeafType();
 
             // First try direct object map
             Object obj = classToObjectMap.get(leafType);
@@ -600,7 +600,7 @@ public abstract class FuelModule {
 
             // FLog.d( "New Instance %s @ %s", leafType, context );
             try {
-                return lazy.leafType.newInstance();
+                return lazy.getLeafType().newInstance();
             } catch (Exception e) {
                 if (lazy.isDebug()) {
                     FLog.leaveBreadCrumb("newInstance no empty constructor for %s", lazy);
@@ -608,7 +608,7 @@ public abstract class FuelModule {
                 // FLog.d( "No Empty Constructor for '%s'", leafType );
             }
 
-            final Class<?> leafType = lazy.leafType;
+            final Class<?> leafType = lazy.getLeafType();
             final Context context = lazy.getContext();
 
             Constructor[] constructors = leafType.getConstructors();
@@ -694,7 +694,7 @@ public abstract class FuelModule {
         FuelInjector.doPostProcess(lazy);
 
         doOnFueled(lazy, false);
-        if (FuelInjector.isSingleton(lazy.leafType)) { // TODO: could totally cache lazy.isSingleton ... later.
+        if (FuelInjector.isSingleton(lazy.getLeafType())) { // TODO: could totally cache lazy.isSingleton ... later.
             Object obj = onInstanceCreated(lazy);
             if (lazy.getInstance() != obj) {
                 lazy.setInstance(obj);
