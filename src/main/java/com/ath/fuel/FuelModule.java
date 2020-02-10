@@ -437,7 +437,7 @@ public abstract class FuelModule {
      * @param to
      * @see #bind(Class, Class)
      */
-    protected void bind(Class<?> from, Object to) {
+    protected void bind(Class<?> from, @NonNull Object to) {
         if (FuelInjector.isDebug()) {
             if (from == null) {
                 throw new FuelInjectionBindException("bind failure baseType cannot be null");
