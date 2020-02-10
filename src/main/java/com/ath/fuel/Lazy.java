@@ -213,7 +213,7 @@ public final class Lazy<T> {
         return contextRef != null;
     }
 
-    public final Context getContext() throws FuelUnableToObtainContextException {
+    public final @NonNull Context getContext() throws FuelUnableToObtainContextException {
         Context context = null;
         if (hasContext()) {
             context = contextRef.get();

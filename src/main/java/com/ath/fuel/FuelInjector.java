@@ -2,15 +2,14 @@ package com.ath.fuel;
 
 import android.app.Activity;
 import android.app.Application;
-import android.app.Application.ActivityLifecycleCallbacks;
 import android.app.Service;
 import android.content.Context;
 import android.content.ContextWrapper;
 import android.content.Intent;
-import android.os.Bundle;
 import android.view.View;
 
 import androidx.annotation.MainThread;
+import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.collection.SparseArrayCompat;
 
@@ -30,15 +29,10 @@ import java.util.WeakHashMap;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 
+@SuppressWarnings({"unchecked", "BooleanMethodIsAlwaysInverted", "WeakerAccess", "FinalPrivateMethod", "FinalStaticMethod", "unused", "UnusedAssignment", "SameParameterValue"})
 public final class FuelInjector {
     static FuelInjector injector = new FuelInjector();
     private static Application app;
-    private static Activity activity; // Not a weakref -- this is okay because it gets assigned to the next activity each time a new activity is
-    // created, so the previous
-    // one is never held unless the app goes to the background in which case, if the activity is onDestroy'd there will have to be a
-    // new one when the app is resumed so still calls onActivityCreate so okay! -- We chose not to use a weakref because in the rare
-    // case of low memory, it could get GC'd and then you end up referring to a null activity I think its not bad to hold onto in this
-    // case
 
     private static boolean isDebug = false;
     private static final ReentrantReadWriteLock cacheLock = new ReentrantReadWriteLock();
@@ -75,19 +69,12 @@ public final class FuelInjector {
         return app;
     }
 
-    /**
-     * not guaranteed to exist
-     */
-    static final @Nullable Activity getActivity() {
-        return activity;
-    }
-
     static WeakReference<Context> getContextRef(Context context) {
         synchronized (context) { // synchronized on context because we dont want to hold up an activity when a background service is working
             context = toContext(context);
             WeakReference<Context> out = injector.contextToWeakContextCache.get(context);
             if (out == null) {
-                out = new WeakReference<Context>(context);
+                out = new WeakReference<>(context);
                 injector.contextToWeakContextCache.put(context, out);
             }
             return out;
@@ -411,7 +398,7 @@ public final class FuelInjector {
         child.inheritScopeRef(parent);
 
         if (child.isDebug()) {
-            FLog.leaveBreadCrumb("doPreProcessChild for %s, context ended up with %s", child, context == null ? "null" : context.getClass().getSimpleName());
+            FLog.leaveBreadCrumb("doPreProcessChild for %s, context ended up with %s", child, context.getClass().getSimpleName());
         }
 
         if (isService(child.leafType)) {
@@ -440,11 +427,10 @@ public final class FuelInjector {
     /**
      * Can a access b ?
      *
-     * @param a
-     * @param b
-     * @throws FuelScopeViolationException
+     * @throws FuelScopeViolationException -
      */
     static void validateScope(Scope a, Scope b) throws FuelScopeViolationException {
+        //noinspection PointlessNullCheck -- it makes me feel better seeing it ok?
         if (a == null || b == null || !a.canAccess(b)) {
             throw new FuelScopeViolationException("Fuel Scope Violation: %s cannot access %s", a, b);
         }
@@ -485,46 +471,9 @@ public final class FuelInjector {
             }
         }
 
+        //noinspection AccessStaticViaInstance
         injector.mainThreadId = Thread.currentThread().getId();
         FuelInjector.app = fuelModule.getApplication();
-
-        fuelModule.setActivityCallbacks(new ActivityLifecycleCallbacks() {
-            @Override
-            public void onActivityCreated(Activity activity, Bundle savedInstanceState) {
-                try {
-                    FuelInjector.activity = activity;
-                    ignite(activity, activity);
-                } catch (Exception e) {
-                    FLog.e(e);
-                }
-            }
-
-            @Override
-            public void onActivityStarted(Activity activity) {
-                FuelInjector.activity = activity;
-            }
-
-            @Override
-            public void onActivityResumed(Activity activity) {
-                FuelInjector.activity = activity;
-            }
-
-            @Override
-            public void onActivityPaused(Activity activity) {
-            }
-
-            @Override
-            public void onActivityStopped(Activity activity) {
-            }
-
-            @Override
-            public void onActivitySaveInstanceState(Activity activity, Bundle outState) {
-            }
-
-            @Override
-            public void onActivityDestroyed(Activity activity) {
-            }
-        });
 
         injector.fuelModule = fuelModule;
         fuelModule.configure();
@@ -549,42 +498,18 @@ public final class FuelInjector {
     /**
      * Does not attain, only returns an item that is already in the cache or null.
      */
-    @Nullable private static final <T> T findInstance(Context context, Class<T> type) {
+    @Nullable private static final <T> T findInstance(@NonNull Context context, Class<T> type) {
         return getInstance(context, CacheKey.attain(type), null, false); // FIXME lazy cant be null
     }
 
     /**
      * Does not attain, only returns an item that is already in the cache or null.
      */
-    @Nullable private static final <T> T findInstance(Context context, Class<T> type, Integer flavor) {
+    @Nullable private static final <T> T findInstance(@NonNull Context context, Class<T> type, Integer flavor) {
         return getInstance(context, CacheKey.attain(type, flavor), null, false); // FIXME lazy cant be null
     }
 
-    static final <T> T getInstance(Context context, CacheKey key, Lazy lazy, boolean debug) {
-        // if ( Application.class.isAssignableFrom( key.getLeafType() ) ) {
-        // return (T) getApp();
-        // } else if ( Activity.class.isAssignableFrom( key.getLeafType() ) ) {
-        //
-        // // FIXME: FUEL this breaks when injecting an Activity from a Module using the App context :(
-        // if ( context instanceof Activity ) {
-        // return (T) context;
-        // } else {
-        // // throw new IllegalStateException( "You're trying to create a context singleton with an app context -- not cool" );
-        // FLog.w( "You are injecting an Activity from an Application Context, this will result in the 'Active' Activity." );
-        // return (T) getActivity();
-        // }
-        // } else if ( Activity.class.isAssignableFrom( key.getLeafType() ) || Application.class.isAssignableFrom( key.getLeafType() ) ) {
-        // return (T) context;
-        // }
-
-        // a service wants a context
-        // -- context = service or app
-        // -- leaf = Context, App or Activity
-
-        // an activity wants a service
-        // -- context = activity or app
-        // -- leaf = service
-
+    static final <T> T getInstance(@NonNull Context context, CacheKey key, Lazy lazy, boolean debug) {
         if (isApplication(key.getLeafType())) {
             if (debug) {
                 FLog.leaveBreadCrumb("getInstance for App got %s", getApp() == null ? "null" : getApp().getClass().getSimpleName());
@@ -592,7 +517,7 @@ public final class FuelInjector {
             return (T) getApp();
         } else if (isActivity(key.getLeafType()) && context instanceof Activity) {
             if (debug) {
-                FLog.leaveBreadCrumb("getInstance for Activity got %s", context == null ? "null" : context.getClass().getSimpleName());
+                FLog.leaveBreadCrumb("getInstance for Activity got %s", context.getClass().getSimpleName());
             }
             return (T) context;
         } else if (isService(key.getLeafType())) {
@@ -603,7 +528,7 @@ public final class FuelInjector {
             return serviceInstance;
         } else if (isContext(key.getLeafType())) {
             if (debug) {
-                FLog.leaveBreadCrumb("getInstance for Context got %s", context == null ? "null" : context.getClass().getSimpleName());
+                FLog.leaveBreadCrumb("getInstance for Context got %s", context.getClass().getSimpleName());
             }
             return (T) context;
         }
@@ -671,6 +596,7 @@ public final class FuelInjector {
                 if (lazy.isDebug()) {
                     FLog.leaveBreadCrumb("newInstance for singleton %s", lazy);
                 }
+                //noinspection SynchronizeOnNonFinalField -- this type is well encapsulated, it wont change
                 synchronized (lazy.leafType) {
                     object = (T) injector.getObjectByContextType(lazy, key);
                     if (lazy.isDebug()) {
