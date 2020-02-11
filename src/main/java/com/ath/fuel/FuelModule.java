@@ -125,7 +125,205 @@ public abstract class FuelModule {
     We then check that module for a matching injectable.
     If that module can't find a match, it looks up it's known ancestors until a match is found or scope ends.
 
+
+    --
+
+    Thoughts
+
+    What if adding modules can be done at a package level and the inheritance follows the packages
+     - multiple modules allows for multiple instances of a singleton
+       - Lets say
+             A            (App)
+         B       C        (Act)
+       D   E   F   G      (Frag) // NOTE: To reg a Frag, you must reg it's view.
+      H I J K L M N O     (View)
+
+        if B and C both define a provider for the same class, then either they both get their own instance or one gets something constructed in an unexpected way
+        - This only happens if B & C define an AppSingleton
+          So AppSingletons must be defined in AppModule?
+          But we want packages to be able to define their own?
+
+          So when a module defines an injectable for a scope above its own, that mapping is placed in the nearest module matching that scope.
+          - Enforced by LINT and RUNTIME
+          - What about runtime changing of modules?
+            - G defines an AppSingleton, then dies, then X swaps in at runtime and defines a different one..
+              - FIXED: G cannot define an AppSingleton. Instead it can define an AppModule that defines an AppSingleton and register that AppModule with the root module
+
+            - In order for a sub package to define an AppSingleton, it must define an AppModule and add it to the existing AppModule
+              - This way that app module cannot come and go.
+            - In order for a view level package to define a FragSingleton
+              - It must define a FragModule and append the FragModule to
+            - maybe lower level packages CAN ONLY define App and Activity Singletons
+            - maybe the only scope lower level packages can define mappings for above their scope is App and Activity?
+              - By that I mean, a ViewModule can define App/Activity/View singletons, but not Fragment.
+              - Why? Because unless you're defining the Fragment, how do you know there is even a fragment to scope by?
+              - We ditch FragScope and just have App/Activity/View scopes ?
+                - Frag would just be treated as a view
+                - This solves knowing if a Frag is present or not but it doesnt solve nested View Modules overwriting each other.
+                - See: Multiple Defs Continued
+
+     Benefit ?
+     It lets packaged up things define their own things rather than stuffing it up under the main module.
+     I can do that by just having the configure&bind methods,
+     Do I really need a whole module?
+
+     The benefit of a module would be that it can own instances scoped below it making it easier to destroy them when going out of scope
+
+     How would we find these instances?
+     Look up the tree and find the nearest module that has what you need?
+
+     How do we maintain the tree?
+     When we ignite ?
+
+     A, C and G must ignite themselves
+     -- is it fine to say only things that ignite themselves can define their own module?
+     YES: because if something can inject them, then they belong to that parent's module.
+     OK: So we connect the dots during ignite.
+
+     A as App has App
+     C as Act has Act and App
+     G as Frag has Frag and Act and App
+     O as View has Act and App but no Frag
+     What about Views defining a module? Should work the same as a Frag
+
+     How does O get the frag?  The view tree?
+     When a Frag ignites, it must provide it's root view.
+     Then when a view looks up the view tree, it finds a view associated with a Frag and then the frag can get to the module
+
+     Done
+
+     What about Don't Keep Activities losing this View->Frag association ?
+     When the activity is destroyed, so are all of its singletons.
+     When the activity is rebuilt, so are all of its singletons.
+     Their state is lost but its the job of the activity, fragment, and views to restoreInstanceState and re-establish listeners / subscribers
+
+     Done
+
+
+     # Multiple Defs Continued
+     Is the pojo a singleton?
+     No:  Then there is no scope, its just a matter of how to instantiate it aka find a provider in a module.
+          For non singletons we start from the top level module and work our way down until we find a provider.
+          Since modules are always registered with a parent, it should be easy to build the tree at runtime.
+
+     YES: by pojo we mean something we can construct (unlike Activities, etc)
+          Lets say we only want this to live at the Fragment level...
+          So it should be defined in a fragment level module?
+            Not necessarily but its possible.
+            So when it IS only defined at a Fragment level module, can it be defined in multiple parallel fragment level modules?
+              YES: This basically gives you polymorphism.  What you git differs based on what/where you are.
+                   Modules MUST not overlap -- this is fine because a fragment/view can only define one via ignite
+            When its not defined at a Fragment level, it means that its mapping is common (not polymorphic)
+              Any fragment scope can inject it and they all get the same provider but different instances when different fragments.
+
+            What if we define a fragment mapping at the root, but then we want to override it at a lower tree level ?
+                Going top down will take the root first....
+
+             A            (App)
+         B       C        (Act)
+       D   E   F   G      (View) // fragments
+      H I J K L M N O     (View)
+
+                Top Down:
+                    - if A defines a FragSingleton and G defines the same FragSingleton -
+                      broken: G would get something defined by A unexpected
+
+                      We go straight to the top for AppSingletons since we always know the app module
+                      but the app module may have child app modules.
+                      - When its inserted there is a failure and you must acknowledge the duplicate mapping
+                        by removing yours or entering an explicit "duplicateMapping --take theirs or take ours" etc
+                        It would be highly unlikely this will happen outside of our own codebase.
+                        If it did then we'd just rename ours?
+
+                Bottom Up:
+                    - if the class->provider map is defined twice in the stack then
+                      Different parts of teh tree could get different definitions
+                      This is ok if the scope is different, but what if its not?
+                      What if M and O both define a provider for a FragSingleton -- seems ok
+                      What if N and O both define a provider for a FragSingleton -- seems as one of them would get unwanted results broken N & O compete
+                      What if FragScoped Singletons must be defined by a FragScoped Module -- solved
+                        FragFuelModule can only be ignited by a fragment?
+                        FragSingletons can only be defined by Frag (or greater) scoped modules
+
+                      What if A defines a FragSingleton and C defines the same one?
+                      - Then B's fragments get the default from A
+                        And  C's fragments get the override from C
+
+                      What if G defines a ViewSingleton (which evaporates with its module) and O defines the same ?
+                      - G & N get the same singleton, but O gets something different
+                        - As a rule: the same map cannot be defined twice in the same tree
+                          If G defines V and F defines V its fine, they're both the root of their View Scopes
+                          If F defines V and O defines V its fine, they're in different view trees from view scope down
+                          If G defines V and O defines V its a fail because N and O will get something different.
+
+                      Is this a special case for views?
+                      No not really, if you think about it, its the same pattern as App and Activity
+                      Apps A1 and A2 never talk so its not an issue plus you can't define above A
+                      Acts B and C (let A be a ActivitySingleton Mapping)
+                        - B and C can only map AppSingletons in an AppModule like any other level trying to map above its scope
+                        - if B defines A and C defines A its fine, they'll never cross communicate
+                        - if B defines V and C defines V its fine, they'll never cross communicate
+                        - if C defines V and G defines V its a fail - it broke our rule: two maps in the same tree
+
+                      RULE: Cannot have two maps with the same "from" in the same tree
+                      - How do we define the tree
+
+             A            (App)  AppS
+         B       C        (Act)  ActS
+       D   E   F   G      (View) VewS
+      H I J K L M N O     (View) VewS
+
+                        Rules:
+                        - If A defines AppS, then it cannot be defined again between A & HIJKLMNO
+                        - If A defines ActS, then it cannot be defined again between A & A   // begin & begin^
+                        - IF A defines VewS, then it cannot be defined again between A & BC  // begin & begin^
+                        - If B defines AppS, then it cannot be defined again between A & HIJKLMNO
+                        - If B defines ActS, then it cannot be defined again between B & HIJK
+                        - IF B defines VewS, then it cannot be defined again
+                        - If D defines AppS, then it cannot be defined again between A & HIJKLMNO
+                        - If D defines ActS, then it cannot be defined again
+                        - If D defines VewS, then it cannot be defined again
+                        - If H defines AppS, then it cannot be defined again between A & HIJKLMNO
+                        - If H defines ActS, then it cannot be defined again
+                        - If H defines VewS, then it cannot be defined again D-HI, E-JK
+
+                        when we define a map, that mapping is placed at the root-most module scoped teh same as the map->scope
+                        if a map of the same leaftype exists, its a fail.
+
+                        So mappings are bubbled up
+                        we then find them bottom up // except for App & Activity singletons which we can just shortcut straight to them.
+                        submodules must be registered at compile time or statically ? // TODO
+
+                        - What about sub libraries that define a map that conflicts and we can't change their code to fix it?
+                        - Perhaps we provide a means to acknowledge and mute them
+                          - Take theirs, take ours ? optional ?
+
+                        What about when O adds a class -> instance mapping where class is AppScoped, instance becomes a singleton
+                        What about when O adds a class -> instance mapping where class is ActScoped, instance becomes an ActSingleton
+                        What about when O adds a class -> instance mapping where class is VewScoped, instance becomes a VewSingleton
+                        - which view? All views? the root view, whats the root view? // TODO broken
+
+                        ViewScoped implies every view gets its own -- is that what we really want?
+                        I think what we really want is to acknowledge a viewtree root and scope everythign there.
+                        How?
+                        Annotate a CustomView/Fragment as a ViewRoot and every view under that root shares a scope?
+                        There can only be one ViewRoot vertically? but many horizontally?
+                        Above the ViewRoot is considered ActivityScope
+                        ViewRoot cant be applied to a Fragment or A CustomView
+
+
+                 What about multiple defs in modules we add to the root module?  Take the first/last or throw an error?
+                 - because we now bubble up, multiple defs of the same from->... cannot coexist
+
+     BEWARE: when submodules add mapping, that mapping must stay in that submodule -- DO NOT try to cache it at the tippy top
+     Why ? because mapping class -> instance should keep that instance alive only at the module scope
+     by promoting the mapping to the root level, we're also promoting that instance to App Singleton.
+     this is why we only promo mappings to the root of the appropriate scope
+
+
      */
+
+
 
     FuelModule(@NonNull FuelModule parent) { // FIXME: Submodule
         parent.addSubModule(this);
