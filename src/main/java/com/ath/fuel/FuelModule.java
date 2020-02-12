@@ -17,19 +17,23 @@ import android.widget.ArrayAdapter;
 import androidx.annotation.CallSuper;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
+import androidx.collection.SparseArrayCompat;
 
 import com.ath.fuel.err.FuelInjectionBindException;
 import com.ath.fuel.err.FuelInjectionException;
 import com.ath.fuel.err.FuelUnableToObtainInstanceException;
 
 import java.lang.reflect.Constructor;
-import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.WeakHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.locks.Lock;
+import java.util.concurrent.locks.ReentrantReadWriteLock;
 
 public abstract class FuelModule {
 
@@ -60,22 +64,32 @@ public abstract class FuelModule {
     // - ScopeObject would be the context, or the fragment, paired to the scope
     // - CacheKey describes the instance we're looking for
     // - instance the hidden treasure
+    private static final ReentrantReadWriteLock cacheLock = new ReentrantReadWriteLock();
     private final Map<Scope, WeakHashMap<Object, Map<CacheKey, Object>>> scopeCache = new HashMap<>();
-    private final Map<Object, WeakHashMap<Object, Lazy>> lazyCache = Collections.synchronizedMap(new WeakHashMap<Object, WeakHashMap<Object, Lazy>>());
+    private static final SparseArrayCompat<Class> leafTypeCache = new SparseArrayCompat<>();
 
-    private final HashMap<Class<?>, Class<?>> classToClassMap = new HashMap<>();
-    private final HashMap<Class<?>, Object> classToObjectMap = new HashMap<>();
-    private final HashMap<Class<?>, FuelProvider> classToProviderMap = new HashMap<>();
-    private Application app;
+    private final @NonNull Map<Class<?>, Class<?>> classToClassMap = new HashMap<>();
+    private final @NonNull Map<Class<?>, Object> classToObjectMap = new HashMap<>();
+    private final @NonNull Map<Class<?>, FuelProvider> classToProviderMap = new HashMap<>();
+    private final @NonNull Set<Class<?>> classMaps = new HashSet<>();
+    private final @NonNull Application app;
 
     private final @NonNull List<FuelModule> submodules = new CopyOnWriteArrayList<>(); // FIXME: Submodule - WeakRef
-    private @Nullable FuelModule parent = null; // FIXME: Submodule - WeakRef
-
+    @Nullable FuelModule parent = null; // FIXME: Submodule - WeakRef
 
     /* package private */
     Application.ActivityLifecycleCallbacks localLifecycleCallbacks;
 
-    public FuelModule(Application app) {
+    /**
+     * @param app
+     * @param context - WeakRef
+     */
+    FuelModule(@NonNull Application app, @NonNull Context context) {
+        this.app = app;
+
+    }
+
+    public FuelModule(@NonNull Application app) {
         this.app = app;
 
         localLifecycleCallbacks = new Application.ActivityLifecycleCallbacks() {
@@ -110,249 +124,39 @@ public abstract class FuelModule {
         app.registerActivityLifecycleCallbacks(localLifecycleCallbacks);
     }
 
-    /*
-
-    I'm thinking we support nested modules.
-
-    When I request an injectable, I start from the nearest module relative to me in the tree.
-    I check for a match, and bubble my way up the tree until I find it, or I reach the limit of my scope.
-
-    The tree should be deterministic by the View Tree? This could create problems for tests.
-    Solution: We only use the view tree to provide the initial module, from there the modules should be aware.
-
-    So:
-    A view searches up the view tree and finds a parent fragment has a module associated with it.
-    We then check that module for a matching injectable.
-    If that module can't find a match, it looks up it's known ancestors until a match is found or scope ends.
-
-
-    --
-
-    Thoughts
-
-    What if adding modules can be done at a package level and the inheritance follows the packages
-     - multiple modules allows for multiple instances of a singleton
-       - Lets say
-             A            (App)
-         B       C        (Act)
-       D   E   F   G      (Frag) // NOTE: To reg a Frag, you must reg it's view.
-      H I J K L M N O     (View)
-
-        if B and C both define a provider for the same class, then either they both get their own instance or one gets something constructed in an unexpected way
-        - This only happens if B & C define an AppSingleton
-          So AppSingletons must be defined in AppModule?
-          But we want packages to be able to define their own?
-
-          So when a module defines an injectable for a scope above its own, that mapping is placed in the nearest module matching that scope.
-          - Enforced by LINT and RUNTIME
-          - What about runtime changing of modules?
-            - G defines an AppSingleton, then dies, then X swaps in at runtime and defines a different one..
-              - FIXED: G cannot define an AppSingleton. Instead it can define an AppModule that defines an AppSingleton and register that AppModule with the root module
-
-            - In order for a sub package to define an AppSingleton, it must define an AppModule and add it to the existing AppModule
-              - This way that app module cannot come and go.
-            - In order for a view level package to define a FragSingleton
-              - It must define a FragModule and append the FragModule to
-            - maybe lower level packages CAN ONLY define App and Activity Singletons
-            - maybe the only scope lower level packages can define mappings for above their scope is App and Activity?
-              - By that I mean, a ViewModule can define App/Activity/View singletons, but not Fragment.
-              - Why? Because unless you're defining the Fragment, how do you know there is even a fragment to scope by?
-              - We ditch FragScope and just have App/Activity/View scopes ?
-                - Frag would just be treated as a view
-                - This solves knowing if a Frag is present or not but it doesnt solve nested View Modules overwriting each other.
-                - See: Multiple Defs Continued
-
-     Benefit ?
-     It lets packaged up things define their own things rather than stuffing it up under the main module.
-     I can do that by just having the configure&bind methods,
-     Do I really need a whole module?
-
-     The benefit of a module would be that it can own instances scoped below it making it easier to destroy them when going out of scope
-
-     How would we find these instances?
-     Look up the tree and find the nearest module that has what you need?
-
-     How do we maintain the tree?
-     When we ignite ?
-
-     A, C and G must ignite themselves
-     -- is it fine to say only things that ignite themselves can define their own module?
-     YES: because if something can inject them, then they belong to that parent's module.
-     OK: So we connect the dots during ignite.
-
-     A as App has App
-     C as Act has Act and App
-     G as Frag has Frag and Act and App
-     O as View has Act and App but no Frag
-     What about Views defining a module? Should work the same as a Frag
-
-     How does O get the frag?  The view tree?
-     When a Frag ignites, it must provide it's root view.
-     Then when a view looks up the view tree, it finds a view associated with a Frag and then the frag can get to the module
-
-     Done
-
-     What about Don't Keep Activities losing this View->Frag association ?
-     When the activity is destroyed, so are all of its singletons.
-     When the activity is rebuilt, so are all of its singletons.
-     Their state is lost but its the job of the activity, fragment, and views to restoreInstanceState and re-establish listeners / subscribers
-
-     Done
-
-
-     # Multiple Defs Continued
-     Is the pojo a singleton?
-     No:  Then there is no scope, its just a matter of how to instantiate it aka find a provider in a module.
-          For non singletons we start from the top level module and work our way down until we find a provider.
-          Since modules are always registered with a parent, it should be easy to build the tree at runtime.
-
-     YES: by pojo we mean something we can construct (unlike Activities, etc)
-          Lets say we only want this to live at the Fragment level...
-          So it should be defined in a fragment level module?
-            Not necessarily but its possible.
-            So when it IS only defined at a Fragment level module, can it be defined in multiple parallel fragment level modules?
-              YES: This basically gives you polymorphism.  What you git differs based on what/where you are.
-                   Modules MUST not overlap -- this is fine because a fragment/view can only define one via ignite
-            When its not defined at a Fragment level, it means that its mapping is common (not polymorphic)
-              Any fragment scope can inject it and they all get the same provider but different instances when different fragments.
-
-            What if we define a fragment mapping at the root, but then we want to override it at a lower tree level ?
-                Going top down will take the root first....
-
-             A            (App)
-         B       C        (Act)
-       D   E   F   G      (View) // fragments
-      H I J K L M N O     (View)
-
-                Top Down:
-                    - if A defines a FragSingleton and G defines the same FragSingleton -
-                      broken: G would get something defined by A unexpected
-
-                      We go straight to the top for AppSingletons since we always know the app module
-                      but the app module may have child app modules.
-                      - When its inserted there is a failure and you must acknowledge the duplicate mapping
-                        by removing yours or entering an explicit "duplicateMapping --take theirs or take ours" etc
-                        It would be highly unlikely this will happen outside of our own codebase.
-                        If it did then we'd just rename ours?
-
-                Bottom Up:
-                    - if the class->provider map is defined twice in the stack then
-                      Different parts of teh tree could get different definitions
-                      This is ok if the scope is different, but what if its not?
-                      What if M and O both define a provider for a FragSingleton -- seems ok
-                      What if N and O both define a provider for a FragSingleton -- seems as one of them would get unwanted results broken N & O compete
-                      What if FragScoped Singletons must be defined by a FragScoped Module -- solved
-                        FragFuelModule can only be ignited by a fragment?
-                        FragSingletons can only be defined by Frag (or greater) scoped modules
-
-                      What if A defines a FragSingleton and C defines the same one?
-                      - Then B's fragments get the default from A
-                        And  C's fragments get the override from C
-
-                      What if G defines a ViewSingleton (which evaporates with its module) and O defines the same ?
-                      - G & N get the same singleton, but O gets something different
-                        - As a rule: the same map cannot be defined twice in the same tree
-                          If G defines V and F defines V its fine, they're both the root of their View Scopes
-                          If F defines V and O defines V its fine, they're in different view trees from view scope down
-                          If G defines V and O defines V its a fail because N and O will get something different.
-
-                      Is this a special case for views?
-                      No not really, if you think about it, its the same pattern as App and Activity
-                      Apps A1 and A2 never talk so its not an issue plus you can't define above A
-                      Acts B and C (let A be a ActivitySingleton Mapping)
-                        - B and C can only map AppSingletons in an AppModule like any other level trying to map above its scope
-                        - if B defines A and C defines A its fine, they'll never cross communicate
-                        - if B defines V and C defines V its fine, they'll never cross communicate
-                        - if C defines V and G defines V its a fail - it broke our rule: two maps in the same tree
-
-                      RULE: Cannot have two maps with the same "from" in the same tree
-                      - How do we define the tree
-
-             A            (App)  AppS
-         B       C        (Act)  ActS
-       D   E   F   G      (View) VewS
-      H I J K L M N O     (View) VewS
-
-                        Rules:
-                        - If A defines AppS, then it cannot be defined again between A & HIJKLMNO
-                        - If A defines ActS, then it cannot be defined again between A & A   // begin & begin^
-                        - IF A defines VewS, then it cannot be defined again between A & BC  // begin & begin^
-                        - If B defines AppS, then it cannot be defined again between A & HIJKLMNO
-                        - If B defines ActS, then it cannot be defined again between B & HIJK
-                        - IF B defines VewS, then it cannot be defined again
-                        - If D defines AppS, then it cannot be defined again between A & HIJKLMNO
-                        - If D defines ActS, then it cannot be defined again
-                        - If D defines VewS, then it cannot be defined again
-                        - If H defines AppS, then it cannot be defined again between A & HIJKLMNO
-                        - If H defines ActS, then it cannot be defined again
-                        - If H defines VewS, then it cannot be defined again D-HI, E-JK
-
-                        when we define a map, that mapping is placed at the root-most module scoped teh same as the map->scope
-                        if a map of the same leaftype exists, its a fail.
-
-                        So mappings are bubbled up
-                        we then find them bottom up // except for App & Activity singletons which we can just shortcut straight to them.
-                        submodules must be registered at compile time or statically ? // TODO
-
-                        - What about sub libraries that define a map that conflicts and we can't change their code to fix it?
-                        - Perhaps we provide a means to acknowledge and mute them
-                          - Take theirs, take ours ? optional ?
-
-                        What about when O adds a class -> instance mapping where class is AppScoped, instance becomes a singleton
-                        What about when O adds a class -> instance mapping where class is ActScoped, instance becomes an ActSingleton
-                        What about when O adds a class -> instance mapping where class is VewScoped, instance becomes a VewSingleton
-                        - which view? All views? the root view, whats the root view? // TODO broken
-
-                        ViewScoped implies every view gets its own -- is that what we really want?
-                        I think what we really want is to acknowledge a viewtree root and scope everythign there.
-                        How?
-                        Annotate a CustomView/Fragment as a ViewRoot and every view under that root shares a scope?
-                        There can only be one ViewRoot vertically? but many horizontally?
-                        Above the ViewRoot is considered ActivityScope
-                        ViewRoot cant be applied to a Fragment or A CustomView
-
-
-                 What about multiple defs in modules we add to the root module?  Take the first/last or throw an error?
-                 - because we now bubble up, multiple defs of the same from->... cannot coexist
-
-     BEWARE: when submodules add mapping, that mapping must stay in that submodule -- DO NOT try to cache it at the tippy top
-     Why ? because mapping class -> instance should keep that instance alive only at the module scope
-     by promoting the mapping to the root level, we're also promoting that instance to App Singleton.
-     this is why we only promo mappings to the root of the appropriate scope
-
-
-     */
-
-
-
-    FuelModule(@NonNull FuelModule parent) { // FIXME: Submodule
-        parent.addSubModule(this);
-    }
-
-    void prepareForDeath() {
+    @CallSuper
+    protected void onPrepareForDeath() { // TODO: Submodule
         if (localLifecycleCallbacks != null) {
             app.unregisterActivityLifecycleCallbacks(localLifecycleCallbacks);
         }
     }
 
+    @CallSuper
     protected void onActivityCreated(Activity activity, Bundle savedInstanceState) {
     }
 
+
+    @CallSuper
     protected void onActivityStarted(Activity activity) {
     }
 
+    @CallSuper
     protected void onActivityResumed(Activity activity) {
     }
 
+    @CallSuper
     protected void onActivityPaused(Activity activity) {
     }
 
+    @CallSuper
     protected void onActivityStopped(Activity activity) {
     }
 
+    @CallSuper
     protected void onActivitySaveInstanceState(Activity activity, Bundle outState) {
     }
 
+    @CallSuper
     protected void onActivityDestroyed(Activity activity) {
     }
 
@@ -365,12 +169,16 @@ public abstract class FuelModule {
         return lazy.getInstance();
     }
 
-    void addSubModule(@NonNull FuelModule module) {
+    boolean containsModule(@NonNull FuelSubmodule module) {
+        return this.submodules.contains(module);
+    }
+
+    void addSubModule(@NonNull FuelSubmodule module) {
         this.submodules.add(module); // FIXME: Submodule - WeakRef
         module.parent = this; // FIXME: Submodule - WeakRef
     }
 
-    void remSubmodule(@NonNull FuelModule module) {
+    void remSubmodule(@NonNull FuelSubmodule module) {
         this.submodules.remove(module);
         module.parent = null;
         // FIXME: Submodule - destroy all children
@@ -418,9 +226,9 @@ public abstract class FuelModule {
                 return;
             } else if (ignite) { // white-list ignites, ignoring singleton or reqInj
                 // continue
-            } else if (FuelInjector.isSingleton(lazy.getLeafType())) { // TODO: could totally cache lazy.isSingleton ... later.
+            } else if (FuelInjector.get().isSingleton(lazy.getLeafType())) { // TODO: could totally cache lazy.isSingleton ... later.
                 // continue
-            } else if (!FuelInjector.isInjectionRequired(lazy.getLeafType())) {
+            } else if (!FuelInjector.get().isInjectionRequired(lazy.getLeafType())) {
                 // continue
             }
 
@@ -438,7 +246,7 @@ public abstract class FuelModule {
      * @param lazy      the culprit
      * @param exception what went wrong
      */
-    protected void onFailure(Lazy lazy, FuelInjectionException exception) {
+    protected void onFailure(@Nullable Lazy lazy, @NonNull FuelInjectionException exception) {
         throw exception;
     }
 
@@ -457,19 +265,19 @@ public abstract class FuelModule {
     protected Context provideContext(Object object) {
         if (object != null) {
             if (object instanceof Application) {
-                return FuelInjector.getApp(); // may be null if not initialized
+                return FuelInjector.get().getApp(); // may be null if not initialized
             } else if (object instanceof Service) {
-                return FuelInjector.getApp(); // may be null if not initialized
+                return FuelInjector.get().getApp(); // may be null if not initialized
             } else if (object instanceof Activity) {
                 return (Activity) object;
             } else if (object instanceof View) {
                 return ((View) object).getContext();
             } else if (object instanceof ArrayAdapter) {
-                return FuelInjector.toContext(((ArrayAdapter) object).getContext());
+                return FuelInjector.get().toContext(((ArrayAdapter) object).getContext());
             } else if (object instanceof AdapterView) {
-                return FuelInjector.toContext(((AdapterView) object).getContext());
-            } else if (FuelInjector.isAppSingleton(object.getClass())) {
-                return FuelInjector.getApp(); // may be null if not initialized
+                return FuelInjector.get().toContext(((AdapterView) object).getContext());
+            } else if (FuelInjector.get().isAppSingleton(object.getClass())) {
+                return FuelInjector.get().getApp(); // may be null if not initialized
             }
         }
         return null;
@@ -489,12 +297,12 @@ public abstract class FuelModule {
     @CallSuper
     protected final Context provideContext(Class<?> type) {
         if (type != null) {
-            if (FuelInjector.isApplication(type)) {
-                return FuelInjector.getApp(); // may be null if not initialized
-            } else if (FuelInjector.isService(type)) {
-                return FuelInjector.getApp(); // may be null if not initialized
-            } else if (FuelInjector.isAppSingleton(type)) {
-                return FuelInjector.getApp(); // may be null if not initialized
+            if (FuelInjector.get().isApplication(type)) {
+                return FuelInjector.get().getApp(); // may be null if not initialized
+            } else if (FuelInjector.get().isService(type)) {
+                return FuelInjector.get().getApp(); // may be null if not initialized
+            } else if (FuelInjector.get().isAppSingleton(type)) {
+                return FuelInjector.get().getApp(); // may be null if not initialized
             }
         }
         return null;
@@ -589,7 +397,7 @@ public abstract class FuelModule {
      * @param to
      */
     protected void bind(Class<?> from, Class<?> to) {
-        if (FuelInjector.isDebug()) {
+        if (FuelInjector.get().isDebug()) {
             if (from == null) {
                 throw new FuelInjectionBindException("bind failure baseType cannot be null");
             }
@@ -601,6 +409,7 @@ public abstract class FuelModule {
             }
         }
         classToClassMap.put(from, to);
+        classMaps.add(from);
     }
 
     /**
@@ -614,7 +423,7 @@ public abstract class FuelModule {
      * @see #bind(Class, Class)
      */
     protected void bind(Class<?> from, @NonNull Object to) {
-        if (FuelInjector.isDebug()) {
+        if (FuelInjector.get().isDebug()) {
             if (from == null) {
                 throw new FuelInjectionBindException("bind failure baseType cannot be null");
             }
@@ -626,7 +435,8 @@ public abstract class FuelModule {
             }
         }
         classToObjectMap.put(from, to);
-        classToObjectMap.put(to.getClass(), to);
+        // classToObjectMap.put(to.getClass(), to);
+        classMaps.add(from);
     }
 
     /**
@@ -640,16 +450,18 @@ public abstract class FuelModule {
      * @see #bind(Class, Class)
      */
     protected <BASE, DERIVED extends BASE> void bind(Class<BASE> from, FuelProvider<DERIVED> to) {
-        if (FuelInjector.isDebug()) {
+        if (FuelInjector.get().isDebug()) {
             if (from == null) {
                 throw new FuelInjectionBindException("bind failure baseType cannot be null");
             }
         }
         classToProviderMap.put(from, to);
+        classMaps.add(from);
     }
 
     protected void bindReflectively(Class from) {
         classToProviderMap.put(from, REFLECTIVE_PROVIDER);
+        classMaps.add(from);
     }
 
     Application getApplication() {
@@ -703,7 +515,7 @@ public abstract class FuelModule {
                 return initializeNewInstance(lazy);
             }
 
-            if (FuelInjector.isSingleton(leafType)) {
+            if (FuelInjector.get().isSingleton(leafType)) {
                 //noinspection unchecked
                 lazy.setInstance(onInstanceUnattainable(lazy));
                 if (lazy.isDebug()) {
@@ -725,7 +537,7 @@ public abstract class FuelModule {
             if (lazy.isDebug()) {
                 FLog.leaveBreadCrumb("obtainInstance Exception %s", e.getMessage());
             }
-            FuelInjector.doFailure(lazy, new FuelUnableToObtainInstanceException(e));
+            FuelInjector.get().doFailure(lazy, new FuelUnableToObtainInstanceException(e));
         }
         if (lazy.isDebug()) {
             FLog.leaveBreadCrumb("obtainInstance fell through to return null");
@@ -754,7 +566,7 @@ public abstract class FuelModule {
      * <br>
      * For best practice, use Mapping & Providers to construct objects.<br>
      */
-    private static Object newInstance(@NonNull FuelModule module, @NonNull Lazy lazy) throws FuelInjectionException {
+    private Object newInstance(@NonNull FuelModule module, @NonNull Lazy lazy) throws FuelInjectionException {
         try {
 
             if (lazy.isDebug()) {
@@ -792,15 +604,15 @@ public abstract class FuelModule {
                 Class type = parameterTypes[i];
                 // FLog.d( " -- -- resolving %s", type );
 
-                Class toType = getType(module, type, CacheKey.DEFAULT_FLAVOR); // FIXME: FUEL args should support flavors
+                Class toType = getType(type, CacheKey.DEFAULT_FLAVOR); // FIXME: FUEL args should support flavors
 
                 CacheKey key = CacheKey.attain(toType);
-                Object o = FuelInjector.getInstance(context, key, lazy, lazy.isDebug());
+                Object o = getInstance(context, key, lazy, lazy.isDebug());
                 if (o == null) {
                     // here we say false because we dont want to allow non mapped or non singletons to be instantiated for constructor args.
                     // If a constructor takes an Integer as an argument, do you think its expecting a new Integer() ? probably not
                     // but if you want to make exceptions for stuff you can call it out in the FuelModule with markAsInjectable().
-                    o = FuelInjector.newInstance(key, Lazy.attain(context, toType), false);
+                    o = newInstance(key, Lazy.attain(context, toType), false);
                 }
 
                 if (o != null) {
@@ -854,10 +666,10 @@ public abstract class FuelModule {
         if (lazy.isDebug()) {
             FLog.leaveBreadCrumb("initializeNewInstance for %s", lazy);
         }
-        FuelInjector.doPostProcess(lazy);
+        FuelInjector.get().doPostProcess(lazy);
 
         doOnFueled(lazy, false);
-        if (FuelInjector.isSingleton(lazy.getLeafType())) { // TODO: could totally cache lazy.isSingleton ... later.
+        if (FuelInjector.get().isSingleton(lazy.getLeafType())) { // TODO: could totally cache lazy.isSingleton ... later.
             Object obj = onInstanceCreated(lazy);
             if (lazy.getInstance() != obj) {
                 lazy.setInstance(obj);
@@ -880,20 +692,21 @@ public abstract class FuelModule {
      * @return
      */
     // Must stay logically paired with obtainInstance -- not super cool but ... for now.
-    static <T> Class<? extends T> getType(FuelModule module, Class<T> baseType, Integer flavor) { // FIXME: Submodule
-        Object obj = module.classToObjectMap.get(baseType);
+    @NonNull <T> Class<? extends T> getType(Class<T> baseType, Integer flavor) { // FIXME: Submodule
+        Object obj = classToObjectMap.get(baseType);
         if (obj != null) {
+            //noinspection unchecked
             return (Class<? extends T>) obj.getClass();
         }
 
-        FuelProvider<?> provider = module.classToProviderMap.get(baseType);
+        FuelProvider<?> provider = classToProviderMap.get(baseType);
         if (provider != null) {
             return baseType;
         }
 
-        Class<?> toType = module.classToClassMap.get(baseType);
+        Class<?> toType = classToClassMap.get(baseType);
         if (toType != null) {
-            return (Class<? extends T>) getType(module, toType, flavor); // Recursive check
+            return (Class<? extends T>) getType(toType, flavor); // Recursive check
         }
 
         return baseType;
@@ -904,7 +717,7 @@ public abstract class FuelModule {
      *                           empty
      * @return an "immutable" map when primeTheCachEntry = false :/ meh
      */
-    Map<CacheKey, Object> getCacheByContextNotThreadSafe(Lazy lazy, boolean primeTheCacheEntry) { // FIXME: Submodule
+    Map<CacheKey, Object> getCacheByContextNotThreadSafe(@NonNull Lazy lazy, boolean primeTheCacheEntry) { // FIXME: Submodule
         Map<CacheKey, Object> contextCache = null;
         Scope cacheScope = lazy.toCacheScope();
         Object scopeObject = lazy.toObjectScope();
@@ -933,35 +746,219 @@ public abstract class FuelModule {
         return contextCache;
     }
 
-    final void rememberLazyByInstance(Object instance, Lazy lazy) {// FIXME: Submodule
-        Object scopeObject = lazy.toObjectScope();
-        if (scopeObject == null) {
-            scopeObject = lazy.getContext();
+
+    final @NonNull <T> Class<? extends T> toLeafType(@NonNull Class<T> type, Integer flavor) {
+        if (flavor == null) {
+            Class leafType = leafTypeCache.get(type.hashCode());
+            if (leafType == null) {
+                leafType = getType(type, null);
+                leafTypeCache.put(type.hashCode(), leafType);
+            }
+            return leafType;
         }
-        WeakHashMap<Object, Lazy> parentToLazies = lazyCache.get(scopeObject);
-        if (parentToLazies == null) {
-            parentToLazies = new WeakHashMap<>();
-            lazyCache.put(scopeObject, parentToLazies);
-        }
-        parentToLazies.put(instance, lazy);
+        return getType(type, flavor);
     }
 
-    final Lazy findLazyByInstance(Object instance) {// FIXME: Submodule
-        // work-around for WeakHashMap Iterators being fast-fail
-        List<Object> scopedObjects = new ArrayList<>(lazyCache.keySet());
 
-        //for ( Object scopeObject : injector.lazyCache.keySet() ) {
-        for (Object scopeObject : scopedObjects) {
-            if (scopeObject != null) {
-                WeakHashMap<Object, Lazy> parentToLazies = lazyCache.get(scopeObject);
-                if (parentToLazies != null) {
-                    Lazy lazy = parentToLazies.get(instance);
-                    if (lazy != null) {
-                        return lazy;
+    @NonNull FuelModule findModule(@NonNull Lazy<?> lazy) { // FIXME: Submodule
+        // FIXME
+
+        if (lazy.getModule() != null) {
+            return lazy.getModule();
+        }
+
+        Object parent = lazy.getParent();
+        if (parent != null) {
+            Lazy<?> lazyParent = FuelInjector.get().findLazyByInstance(parent);
+        }
+
+
+        return FuelInjector.get().getRootModule();
+    }
+
+    // safe because we hash by type
+    @SuppressWarnings("unchecked") final <T> T newInstance(CacheKey key, @NonNull Lazy lazy, boolean allowAnonymousNewInstance) throws FuelInjectionException {
+        try {
+            T object = null;
+            if (lazy.isSingleton()) {
+                if (lazy.isDebug()) {
+                    FLog.leaveBreadCrumb("newInstance for singleton %s", lazy);
+                }
+                synchronized (lazy.getLeafType()) {
+                    object = (T) getObjectByContextType(lazy, key);
+                    if (lazy.isDebug()) {
+                        FLog.leaveBreadCrumb("newInstance getObjectByContextType returned %s for %s",
+                                object == null ? "null" : object.getClass().getSimpleName(),
+                                lazy);
+                    }
+                    if (object == null) { // safety check in case another thread did the work while we were waiting
+                        object = (T) obtainInstance(lazy, allowAnonymousNewInstance);
+                        if (lazy.isDebug()) {
+                            FLog.leaveBreadCrumb("newInstance obtainInstance returned %s for %s",
+                                    object == null ? "null" : object.getClass().getSimpleName(),
+                                    lazy);
+                        }
+                        if (object != null) {
+                            putObjectByContextType(lazy, key, object);
+                        }
                     }
                 }
+            } else {
+                if (lazy.isDebug()) {
+                    FLog.leaveBreadCrumb("newInstance for non-singleton leaf: %s, type: %s",
+                            lazy.getLeafType() == null ? "null" : lazy.getLeafType().getSimpleName(),
+                            lazy);
+                }
+                object = (T) obtainInstance(lazy, allowAnonymousNewInstance);
             }
+            if (lazy.isDebug()) {
+                FLog.leaveBreadCrumb("newInstance returning %s for leaf type of lazy: %s",
+                        object == null ? "null" : object.getClass().getSimpleName(), lazy);
+            }
+            return object;
+        } catch (FuelInjectionException e) {
+            throw e;
+        } catch (Exception e) {
+            if (lazy.isDebug()) {
+                FLog.leaveBreadCrumb("newInstance Exception %s", e.getMessage());
+            }
+            throw new FuelInjectionException(e);
         }
-        return null;
+    }
+
+
+    final <T> T attainInstance(CacheKey key, @NonNull Lazy<T> lazy, boolean allowAnonymousNewInstance) throws FuelInjectionException {
+        try {
+            if (lazy.isDebug()) {
+                FLog.leaveBreadCrumb("attainInstance for key: %s and lazy: %s", key, lazy);
+            }
+
+            T obj = getInstance(lazy.getContext(), key, lazy, lazy.isDebug()); // go into getInstance here. grrrr.
+            if (lazy.isDebug()) {
+                FLog.leaveBreadCrumb("attainInstance getInstance returned %s", obj == null ? "null" : obj.getClass().getSimpleName());
+            }
+
+            if (obj == null) {
+                obj = newInstance(key, lazy, allowAnonymousNewInstance);
+            }
+            if (lazy.isDebug()) {
+                FLog.leaveBreadCrumb("attainInstance ended up with %s", obj == null ? "null" : obj.getClass().getSimpleName());
+            }
+            return obj;
+        } catch (FuelInjectionException e) {
+            throw FuelInjector.get().doFailure(lazy, e);
+        } catch (Exception e) {
+            if (lazy.isDebug()) {
+                FLog.leaveBreadCrumb("attainInstance Exception: %s", e.getMessage());
+            }
+            throw FuelInjector.get().doFailure(lazy, e);
+        }
+    }
+
+
+    private @Nullable Object getObjectByContextType(@Nullable Lazy lazy, CacheKey key) {
+        if (lazy == null) return null;
+        Lock lock = cacheLock.readLock();
+        try {
+            lock.lock();
+            Map<CacheKey, Object> contextCache = getCacheByContextNotThreadSafe(lazy, false);
+            return contextCache.get(key);
+        } finally {
+            lock.unlock();
+        }
+    }
+
+    /**
+     * @param value instance not lazy, cannot be null
+     */
+    void putObjectByContextType(@NonNull Lazy lazy, CacheKey key, Object value) {
+        Lock lock = cacheLock.writeLock();
+        try {
+            lock.lock();
+            Map<CacheKey, Object> contextCache = getCacheByContextNotThreadSafe(lazy, true);
+            contextCache.put(key, value);
+        } finally {
+            lock.unlock();
+        }
+    }
+
+    final @Nullable <T> T getInstance(@NonNull Context context, @NonNull CacheKey key, @Nullable Lazy lazy, boolean debug) {
+        if (FuelInjector.get().isApplication(key.getLeafType())) {
+            if (debug) {
+                FLog.leaveBreadCrumb("getInstance for App got %s", FuelInjector.get().getApp().getClass().getSimpleName());
+            }
+            //noinspection unchecked
+            return (T) FuelInjector.get().getApp();
+        } else if (FuelInjector.get().isActivity(key.getLeafType()) && context instanceof Activity) {
+            if (debug) {
+                FLog.leaveBreadCrumb("getInstance for Activity got %s", context.getClass().getSimpleName());
+            }
+            //noinspection unchecked
+            return (T) context;
+        } else if (FuelInjector.get().isService(key.getLeafType())) {
+            final T serviceInstance = getServiceInstance(lazy, key, true);
+            if (debug) {
+                FLog.leaveBreadCrumb("getInstance for Service got %s", serviceInstance == null ? "null" : serviceInstance.getClass().getSimpleName());
+            }
+            return serviceInstance;
+        } else if (FuelInjector.get().isContext(key.getLeafType())) {
+            if (debug) {
+                FLog.leaveBreadCrumb("getInstance for Context got %s", context.getClass().getSimpleName());
+            }
+            //noinspection unchecked
+            return (T) context;
+        }
+
+        @SuppressWarnings("unchecked") final T objectByContextType = (T) getObjectByContextType(lazy, key);
+        if (debug) {
+            FLog.leaveBreadCrumb("getInstance getObjectByContextType got %s", objectByContextType == null ? "null" : objectByContextType.getClass().getSimpleName());
+        }
+
+        return objectByContextType;
+    }
+
+    // Currently ignite is talking directly to the cache and is messy :(
+    final <T> T getServiceInstance(Lazy lazy, CacheKey key, boolean willingToWait) {
+        boolean inMainThread = FuelInjector.get().inMainThread();
+        long maxTimeMillis = 1000;
+        long sleepTimeMillis = 20;
+        long startTime = System.currentTimeMillis();
+        int loopCount = 0;
+        long duration = 0;
+        do {
+            try {
+                ++loopCount;
+
+                T object = (T) getObjectByContextType(lazy, key);
+                if (object != null) {
+                    // FLog.d( "SERVICE: getInstance[%s][%s] of %s got %s", loopCount, duration, key.getLeafType().getSimpleName(), object );
+                    return object;
+                }
+
+                if (!inMainThread && willingToWait) {
+                    duration = System.currentTimeMillis() - startTime;
+                    if (duration <= (maxTimeMillis - sleepTimeMillis)) {
+                        try {
+                            Thread.sleep(sleepTimeMillis);
+                        } catch (InterruptedException e) {
+                            FLog.e(e);
+                        }
+                    } else {
+                        // FLog.d( "SERVICE: getInstance[%s][%s] of %s got %s", loopCount, duration, key.getLeafType().getSimpleName(), null );
+                        return null;
+                    }
+                } else {
+                    // most likely a lazy attain but i'm not comfortable with this yet...
+                    // lets test calling lazyService.get() in the main thread -- i hope it will just do everything synchronously and end up with a
+                    // service
+                    // but if not, consider allowing the polling to run for some small amount of time on the main thread?
+                    // FLog.d( "SERVICE: getInstance (Main Thread) of %s got %s", key.getLeafType().getSimpleName(), null );
+                    return null;
+                }
+            } catch (Exception e) {
+                FLog.e(e);
+                return null;
+            }
+        } while (true);
     }
 }

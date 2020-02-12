@@ -1,13 +1,8 @@
 package com.ath.fuel;
 
 import android.app.Activity;
-import android.app.Application;
-import android.app.Service;
 import android.content.Context;
 import android.os.Bundle;
-import android.view.View;
-import android.widget.AdapterView;
-import android.widget.ArrayAdapter;
 
 import androidx.annotation.CallSuper;
 import androidx.annotation.NonNull;
@@ -16,7 +11,7 @@ import androidx.annotation.Nullable;
 import com.ath.fuel.FuelModule.FuelProvider;
 import com.ath.fuel.err.FuelInjectionException;
 
-abstract class FuelSubModule { // TODO
+abstract class XFuelSubModule { // TODO
 
     protected void onActivityCreated(Activity activity, Bundle savedInstanceState) {
     }
@@ -96,23 +91,6 @@ abstract class FuelSubModule { // TODO
      */
     @CallSuper
     protected Context provideContext(Object object) {
-        if (object != null) {
-            if (object instanceof Application) {
-                return FuelInjector.getApp(); // may be null if not initialized
-            } else if (object instanceof Service) {
-                return FuelInjector.getApp(); // may be null if not initialized
-            } else if (object instanceof Activity) {
-                return (Activity) object;
-            } else if (object instanceof View) {
-                return ((View) object).getContext();
-            } else if (object instanceof ArrayAdapter) {
-                return FuelInjector.toContext(((ArrayAdapter) object).getContext());
-            } else if (object instanceof AdapterView) {
-                return FuelInjector.toContext(((AdapterView) object).getContext());
-            } else if (FuelInjector.isAppSingleton(object.getClass())) {
-                return FuelInjector.getApp(); // may be null if not initialized
-            }
-        }
         return null;
     }
 

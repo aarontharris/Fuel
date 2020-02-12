@@ -17,20 +17,20 @@ import java.lang.ref.WeakReference;
 @SuppressWarnings({"unchecked", "BooleanMethodIsAlwaysInverted", "WeakerAccess", "FinalPrivateMethod", "FinalStaticMethod", "unused", "UnusedAssignment"})
 public final class Lazy<T> {
 
-    public static @NonNull <TYPE> Lazy<TYPE> attain(Object parent, Class<TYPE> clazz) {
+    public static @NonNull <TYPE> Lazy<TYPE> attain(@NonNull Object parent, @NonNull Class<TYPE> clazz) {
         return newInstance(parent, clazz, null);
     }
 
-    public static @NonNull <TYPE> Lazy<TYPE> attain(Service parent, Class<TYPE> clazz) {
-        return newInstance(FuelInjector.getApp(), clazz, null);
+    public static @NonNull <TYPE> Lazy<TYPE> attain(@NonNull Service parent, @NonNull Class<TYPE> clazz) {
+        return newInstance(Preconditions.checkNotNull(FuelInjector.get().getApp()), clazz, null);
     }
 
-    public static @NonNull <TYPE> Lazy<TYPE> attain(Object parent, Class<TYPE> clazz, Integer flavor) {
+    public static @NonNull <TYPE> Lazy<TYPE> attain(@NonNull Object parent, @NonNull Class<TYPE> clazz, Integer flavor) {
         return newInstance(parent, clazz, flavor);
     }
 
-    private static @NonNull <TYPE> Lazy<TYPE> newInstance(View parent, Class<TYPE> clazz, Integer flavor) {
-        Lazy<TYPE> lazy = new Lazy<>(clazz, flavor);
+    private static @NonNull <TYPE> Lazy<TYPE> newInstance(@NonNull View parent, @NonNull Class<TYPE> clazz, Integer flavor) {
+        Lazy<TYPE> lazy = new Lazy<>(parent, clazz, flavor, false);
         lazy.isInEditMode = parent.isInEditMode();
         if (!lazy.isInEditMode) {
             preInitializeNewLazy(lazy, parent);
@@ -38,30 +38,27 @@ public final class Lazy<T> {
         return lazy;
     }
 
-    private static @NonNull <TYPE> Lazy<TYPE> newInstance(Object parent, Class<TYPE> clazz, Integer flavor) {
-        Lazy<TYPE> lazy = new Lazy<>(clazz, flavor);
+    private static @NonNull <TYPE> Lazy<TYPE> newInstance(@NonNull Object parent, @NonNull Class<TYPE> clazz, Integer flavor) {
+        Lazy<TYPE> lazy = new Lazy<>(parent, clazz, flavor, false);
         preInitializeNewLazy(lazy, parent);
         return lazy;
     }
 
-    /**
-     * expected use case here is that the parent was just ignited
-     */
-    static @NonNull Lazy newEmptyParent(Object parent) {
-        Lazy lazy = new Lazy(parent.getClass());
+    static @NonNull Lazy newInstanceIgnited(@NonNull Context context, @NonNull Object parent) {
+        Lazy lazy = new Lazy(parent, parent.getClass(), CacheKey.DEFAULT_FLAVOR, true);
         lazy.useWeakInstance = true; // weak here because its expected that this parent was ignited
         lazy.setInstance(parent);
 
-        if (FuelInjector.isFragment(parent.getClass())) {
+        if (FuelInjector.get().isFragment(parent.getClass())) {
             lazy.scopeObjectRef = new WeakReference(parent);
         }
 
         return lazy;
     }
 
-    // FIXME: FUEL if called from background thread without a context, throw an error -- for now i'm just calling red to see them all
-    static final void doThreadCheck(Lazy<?> lazy) {
-        if (!FuelInjector.inMainThread()) {
+    // if called from background thread without a context, throw an error -- for now i'm just calling red to see them all
+    static final void doThreadCheck(@NonNull Lazy<?> lazy) {
+        if (!FuelInjector.get().inMainThread()) {
             StackTraceElement elem = FLog.findStackElem(Lazy.class);
             FLog.e(new IllegalStateException(
                     "Attain Lazy " + lazy.getType() + " from a bg. " + FLog.getSimpleName(elem) + "@" + elem.getLineNumber()));
@@ -72,26 +69,23 @@ public final class Lazy<T> {
     // we come here for it's injectable AppSingleton before ActivitySingleton has its lazy remembered
     // So AppSingleton can't find its parent and ends up creating a new one
     // so AppSingleton is queued up under a temp lazy that never gets processed
-    private static final <TYPE> void preInitializeNewLazy(Lazy<TYPE> lazy, Object parent) {
+    private static final <TYPE> void preInitializeNewLazy(@NonNull Lazy<TYPE> lazy, @NonNull Object parent) {
         Context context = null;
         Lazy lazyParent = null;
 
-        lazy.parentRef = new WeakReference<>(parent);
-
         try {
-            if (FuelInjector.isDebug()) {
+            if (FuelInjector.get().isDebug()) {
                 FLog.leaveBreadCrumb("initialize lazy %s, %s", lazy, parent);
             }
 
-            if (FuelInjector.isInitialized()) {
-                Preconditions.checkNotNull(FuelInjector.getFuelModule()); // never null when initialized
+            if (FuelInjector.get().isInitialized()) {
                 // Hopefully this parent has been ignited already and we'll have a Lazy to show for it
-                lazyParent = FuelInjector.getFuelModule().findLazyByInstance(parent);
+                lazyParent = FuelInjector.get().findLazyByInstance(parent);
                 if (Lazy.isPreProcessed(lazyParent)) {
                     context = (Context) lazyParent.contextRef.get(); // not sure why this cast is necessary? AndroidStudio fail?
 
                     // Do pre-preocess because we know the parent-lazy and do not need to enqueue
-                    FuelInjector.doPreProcessChild(lazy, lazyParent);
+                    FuelInjector.get().doPreProcessChild(lazy, lazyParent);
                 }
             }
         } catch (FuelInjectionException e) {
@@ -99,11 +93,11 @@ public final class Lazy<T> {
             lazy.contextRef = null; // reset
         }
 
-        // Context context = FuelInjector.getFuelModule().provideContext( parent ); // TODO: this may be more trouble than its worth
+        // Context context = FuelInjector.getRootModule().provideContext( parent ); // TODO: this may be more trouble than its worth
 
         if (context == null) {
             // queue up this lazy until the parent is ignited
-            FuelInjector.enqueueLazy(parent, lazy);
+            FuelInjector.get().enqueueLazy(parent, lazy);
         }
     }
 
@@ -113,11 +107,10 @@ public final class Lazy<T> {
     boolean postProcessed = false;
 
     private WeakReference<Object> scopeObjectRef; // We do object bcuz we dont know if its v4.frag or just frag :/
-    private WeakReference<Object> parentRef;
+    private final WeakReference<Object> parentRef;
 
-    Class<T> type; // the type requested, but not necessarily the type to be instantiated
+    final @NonNull Class<T> type; // the type requested, but not necessarily the type to be instantiated
     Class<?> leafType; // the type to be instantiated, not necessarily the type requested but some derivitive.
-    private boolean typeIsContext = false;
     private boolean useWeakInstance = false;
     private T instance = null;
     private WeakReference<T> instanceRef; // for the cases we identify that we don't want to keep a strong ref to the instance
@@ -125,23 +118,31 @@ public final class Lazy<T> {
     private final Integer flavor;
     private boolean isInEditMode;
     private boolean debug;
+    private FuelModule module;
+    private final boolean ignited;
 
-    private Lazy(Class<T> type) {
-        this.type = type;
-        this.typeIsContext = FuelInjector.isContext(type);
-        this.useWeakInstance = this.useWeakInstance || this.typeIsContext; // don't override useWeakInstance if already true
-        this.flavor = CacheKey.DEFAULT_FLAVOR;
+    private Lazy(@NonNull Object parent, @NonNull Class<T> type) {
+        this(parent, type, CacheKey.DEFAULT_FLAVOR, false);
     }
 
-    private Lazy(Class<T> type, Integer flavor) {
+    private Lazy(@NonNull Object parent, @NonNull Class<T> type, Integer flavor, boolean ignited) {
         this.type = type;
-        this.typeIsContext = FuelInjector.isContext(type);
-        this.useWeakInstance = this.useWeakInstance || this.typeIsContext; // don't override useWeakInstance if already true
+        this.useWeakInstance = this.useWeakInstance || FuelInjector.get().isContext(type); // don't override useWeakInstance if already true
         this.flavor = flavor;
+        parentRef = new WeakReference<>(parent);
+        this.ignited = ignited;
     }
 
     void inheritScopeRef(Lazy parent) {
         this.scopeObjectRef = parent.scopeObjectRef;
+    }
+
+    void setModule(@NonNull FuelModule module) {
+        this.module = module;
+    }
+
+    public @Nullable FuelModule getModule() {
+        return module;
     }
 
     /**
@@ -184,15 +185,13 @@ public final class Lazy<T> {
         return this;
     }
 
-    void setLeafType(Class<?> leafType) {
+    void setLeafType(@NonNull Class<?> leafType) {
         this.leafType = leafType;
     }
 
 
-    void setContext(Context context) {
-        if (context != null) {
-            this.contextRef = FuelInjector.getContextRef(FuelInjector.toContext(context));
-        }
+    void setContext(@NonNull Context context) {
+        this.contextRef = FuelInjector.get().getContextRef(context);
     }
 
     static boolean isPostProcessed(Lazy lazy) {
@@ -220,20 +219,26 @@ public final class Lazy<T> {
         }
         if (context == null) {
             if (!isPostProcessed(this)) {
-                throw FuelInjector.doFailure(this, new FuelUnableToObtainContextException("Never Ignited " + this));
+                throw FuelInjector.get().doFailure(this, new FuelUnableToObtainContextException("Never Ignited " + this));
             }
 
-            if (FuelInjector.isAppSingleton(getLeafType())) {
-                context = FuelInjector.getApp();
+            if (FuelInjector.get().isAppSingleton(getLeafType())) {
+                context = FuelInjector.get().getApp();
                 setContext(context);
             }
 
             // Cannot obtain a context, obviously there was some misuse of Fuel that creeped through
             // This is going to be a critical fail, so lets notify the FuelModule of critical fail
             if (context == null) {
-                FuelUnableToObtainContextException err = new FuelUnableToObtainContextException("Unable to obtain context for " + this);
+                StackTraceElement elem = FLog.findStackElem(Lazy.class);
+                FuelUnableToObtainContextException err = new FuelUnableToObtainContextException(
+                        "Context was found to be null when you called Lazy.get() for " + this + " from "
+                                + FLog.getSimpleName(elem) + "@" + elem.getLineNumber() + " -- Why did this happen? " +
+                                "You're trying to inject/attain a Lazy from a class that was not FuelInjector.get().ignite(context)" +
+                                " Or you called lazy.get() before the ignite occurred."
+                );
                 //noinspection ThrowableNotThrown
-                FuelInjector.doFailure(this, err);
+                FuelInjector.get().doFailure(this, err);
                 context = err.consumeContext();
                 if (context == null) {
                     throw err;
@@ -246,7 +251,7 @@ public final class Lazy<T> {
     /**
      * The BaseType - the type that was requested, see {@link #getLeafType()}
      */
-    public final Class<T> getType() {
+    public final @NonNull Class<T> getType() {
         return type;
     }
 
@@ -262,21 +267,21 @@ public final class Lazy<T> {
      * @throws NullPointerException when {@link #getLeafType()} is unavailable
      */
     public boolean isAppSingleton() {
-        return FuelInjector.isAppSingleton(getLeafType());
+        return FuelInjector.get().isAppSingleton(getLeafType());
     }
 
     /**
      * @throws NullPointerException when {@link #getLeafType()} is unavailable
      */
     public boolean isActivitySingleton() {
-        return FuelInjector.isActivitySingleton(getLeafType());
+        return FuelInjector.get().isActivitySingleton(getLeafType());
     }
 
     /**
      * @throws NullPointerException when {@link #getLeafType()} is unavailable
      */
     public boolean isSingleton() {
-        return FuelInjector.isSingleton(getLeafType());
+        return FuelInjector.get().isSingleton(getLeafType());
     }
 
     public final Integer getFlavor() {
@@ -310,7 +315,7 @@ public final class Lazy<T> {
      * May return null and will never throw an exception, however the FuelModule.OnLazyGetFailed will be called.
      */
     public @NonNull T get() throws FuelInjectionException {
-        if (FuelInjector.isDebug()) {
+        if (FuelInjector.get().isDebug()) {
             FLog.leaveBreadCrumb("Lazy.get() %s", this);
         }
         return getChecked();
@@ -330,16 +335,9 @@ public final class Lazy<T> {
                     return getInstance();
                 }
 
-                if (getContext() == null) {
-                    StackTraceElement elem = FLog.findStackElem(Lazy.class);
-                    throw new IllegalStateException(
-                            "Context was found to be null when you called Lazy.get() for " + this.getType() + " from "
-                                    + FLog.getSimpleName(elem) + "@" + elem.getLineNumber() + " -- Why did this happen? " +
-                                    "You're trying to inject/attain a Lazy from a class that was not FuelInjector.ignite(context)" +
-                                    " Or you called lazy.get() before the ignite occurred.");
-                }
+                getContext(); // blows up if context is null
 
-                T instance = FuelInjector.attainInstance(CacheKey.attain(this), this, true);
+                T instance = FuelInjector.get().findModule(this).attainInstance(CacheKey.attain(this), this, true);
                 if (instance == null) {
                     throw new FuelInjectionException("Unable to obtain instance: %s", this);
                 } else {
@@ -352,24 +350,21 @@ public final class Lazy<T> {
             if (debug) {
                 FLog.leaveBreadCrumb("getChecked Exception %s", e.getMessage());
             }
-            throw FuelInjector.doFailure(this, e);
+            throw FuelInjector.get().doFailure(this, e);
         }
         return getInstance();
     }
 
-    Object getParent() {
-        return parentRef == null ? null : parentRef.get();
-    }
-
-    void setParent(Object parent) {
-        parentRef = new WeakReference<>(parent);
+    /** Parent is held via WeakRef -- this will only be null of the parent was GC()'d */
+    @Nullable Object getParent() {
+        return parentRef.get();
     }
 
     /**
      * @return true when FuelInjector is in Debug Mode and this Lazy was obtained via Lazy.attainDebug()
      */
     boolean isDebug() {
-        return debug && FuelInjector.isDebug();
+        return debug && FuelInjector.get().isDebug();
     }
 
     @Override
@@ -389,7 +384,7 @@ public final class Lazy<T> {
             }
 
             return String.format("Lazy[type='%s', leafType='%s', flavor='%s', instance='%s', context='%s'",
-                    (type == null ? null : type.getSimpleName()),
+                    getType().getSimpleName(),
                     (getLeafType() == null ? null : getLeafType().getSimpleName()),
                     flavor,
                     instanceStr,
