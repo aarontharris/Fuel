@@ -389,7 +389,7 @@ public abstract class FuelModule {
             }
         }
         classToClassMap.put(from, to);
-        classMaps.add(from);
+        bindCheckForDupes(from);
     }
 
     /**
@@ -416,7 +416,7 @@ public abstract class FuelModule {
         }
         classToObjectMap.put(from, to);
         // classToObjectMap.put(to.getClass(), to);
-        classMaps.add(from);
+        bindCheckForDupes(from);
     }
 
     /**
@@ -436,12 +436,24 @@ public abstract class FuelModule {
             }
         }
         classToProviderMap.put(from, to);
-        classMaps.add(from);
+        bindCheckForDupes(from);
     }
 
     protected void bindReflectively(Class from) {
         classToProviderMap.put(from, REFLECTIVE_PROVIDER);
+        bindCheckForDupes(from);
+    }
+
+    private void bindCheckForDupes(Class from) {
+        FLog.d("Hi");
+        if (classMaps.contains(from)) {
+            onDuplicateBindingFound(from);
+        }
         classMaps.add(from);
+    }
+
+    protected void onDuplicateBindingFound(Class from) {
+        FLog.w("WARN: " + from.getCanonicalName() + "has already been mapped");
     }
 
     protected void addModule(@NonNull FuelSubmodule submodule) {

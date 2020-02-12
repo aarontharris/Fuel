@@ -28,22 +28,26 @@ public final class FragmentViewMaps { // TODO: move to DI ?
         return maps;
     }
 
-    private WeakHashMap<View, WeakReference<Fragment>> map = new WeakHashMap<>();
+    //    private WeakHashMap<View, WeakReference<Fragment>> map = new WeakHashMap<>();
     private WeakHashMap<Fragment, WeakReference<View>> rmap = new WeakHashMap<>();
 
     private FragmentViewMaps() { }
 
-    public void associate(View view, Fragment fragment) {
-        map.put(view, new WeakReference<>(fragment));
+    public void associate(@NonNull View view, @NonNull Fragment fragment) {
+//        map.put(view, new WeakReference<>(fragment));
         rmap.put(fragment, new WeakReference<>(view));
     }
 
-    public @Nullable Fragment lookup(View view) {
-        WeakReference<Fragment> ref = map.get(view);
-        return ref == null ? null : ref.get();
-    }
+//    public @Nullable Fragment lookup(View view) {
+//        WeakReference<Fragment> ref = map.get(view);
+//        return ref == null ? null : ref.get();
+//    }
 
-    public @Nullable View lookup(Fragment fragment) {
+    /**
+     * Why? Because when we igniteViewRoot for fragment, the given view is not yet attached to the fragment
+     * so we remember it here in the mean time.
+     */
+    public @Nullable View lookup(@NonNull Fragment fragment) {
         WeakReference<View> ref = rmap.get(fragment);
         return ref == null ? null : ref.get();
     }

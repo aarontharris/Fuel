@@ -152,7 +152,7 @@ public final class FuelInjector {
     }
 
     public final @NonNull View igniteViewRootFragment(@NonNull View view, Fragment fragment) {
-        //view.setTag(R.id.fuel_view_root, SENTINEL);
+        view.setTag(R.id.fuel_view_root, SENTINEL);
         FragmentViewMaps.get(view.getContext()).associate(view, fragment);
         ignite(view.getContext(), fragment);
         return view;

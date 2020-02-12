@@ -303,3 +303,15 @@ after it's been inflated w/ FuelInjector.get().annotateViewRoot(view);  The one 
 
 ## SubModules
 - DO NOT create a FuelSubmodule as an inner class with references to an Activity or other things you don't want held forever. FuelSubmodules -- like a FuelModule -- are singletons. Therefore everything inside is strongly held for the remainder of the app. #LEAK!  Instead use a FuelProvider and go nuts. FuelProviders are momentary and discarded once they've provided.
+
+
+
+
+## TODO:
+Don't nest viewroots
+- Unprotected - View hierarchy in Android is determined at Runtime so discovering this would be a bit of overhead at runtime. You can, however, turn on a debug flag to call this out when in debug mode.
+
+- Best practice is to not annotate your custom views here or there based on what you think they will do. Instead it's best to create one empty CustomView, name it "MyViewRoot" (or something) and annotate it.  Then when you want view scoping, just insert that at the root of your tree, or at the root of each section etc.
+
+Don't double map singeltons
+- Protected
