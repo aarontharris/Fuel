@@ -48,11 +48,6 @@ public final class Lazy<T> {
         Lazy lazy = new Lazy(parent, parent.getClass(), CacheKey.DEFAULT_FLAVOR, true);
         lazy.useWeakInstance = true; // weak here because its expected that this parent was ignited
         lazy.setInstance(parent);
-
-        if (FuelInjector.get().isFragment(parent.getClass())) {
-            lazy.scopeObjectRef = new WeakReference(parent);
-        }
-
         return lazy;
     }
 
@@ -106,7 +101,6 @@ public final class Lazy<T> {
     boolean preProcessed = false;
     boolean postProcessed = false;
 
-    private WeakReference<Object> scopeObjectRef; // We do object bcuz we dont know if its v4.frag or just frag :/
     private final WeakReference<Object> parentRef;
 
     final @NonNull Class<T> type; // the type requested, but not necessarily the type to be instantiated
@@ -132,10 +126,6 @@ public final class Lazy<T> {
         this.ignited = ignited;
     }
 
-    void inheritScopeRef(Lazy parent) {
-        this.scopeObjectRef = parent.scopeObjectRef;
-    }
-
     /**
      * Some scopes are consolidated into a shared cache use this to get the cacheScope based on the literal scope
      *
@@ -145,6 +135,7 @@ public final class Lazy<T> {
         switch (scope) {
             case Application:
             case Activity:
+            case ViewRoot:
                 return scope;
         }
         return null;
@@ -162,9 +153,37 @@ public final class Lazy<T> {
                 case Activity:
                     scopeObject = getContext();
                     break;
+                case ViewRoot: // injection for ViewRootSingleton requested by a View
+                    return findViewRoot();
             }
         }
         return scopeObject;
+    }
+
+    private Object findViewRoot() {
+        Object parent = getParent();
+        if (parent == null) {
+            return null;
+        }
+
+        if (FuelInjector.get().isFragment(parent.getClass())) {
+            parent = FuelInjector.get().getFragmentView(parent);
+        }
+
+        if (parent instanceof View) {
+            View view = (View) parent;
+            while (view != null) {
+                if (view instanceof View) {
+                    if (view.getTag(R.id.fuel_view_root) == FuelInjector.SENTINEL) {
+                        return view;
+                    }
+                    view = (View) view.getParent();
+                } else {
+                    break;
+                }
+            }
+        }
+        return getContext();
     }
 
     boolean isCacheable() {

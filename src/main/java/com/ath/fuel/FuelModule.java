@@ -705,8 +705,8 @@ public abstract class FuelModule {
      *                           empty
      * @return an "immutable" map when primeTheCachEntry = false :/ meh
      */
-    Map<CacheKey, Object> getCacheByContextNotThreadSafe(@NonNull Lazy lazy, boolean primeTheCacheEntry) { // FIXME: Submodule
-        Map<CacheKey, Object> contextCache = null;
+    Map<CacheKey, Object> getCacheByScopeObjectNotThreadSafe(@NonNull Lazy lazy, boolean primeTheCacheEntry) { // FIXME: Submodule
+        Map<CacheKey, Object> scopeObjectCache = null;
         Scope cacheScope = lazy.toCacheScope();
         Object scopeObject = lazy.toObjectScope();
 
@@ -718,20 +718,20 @@ public abstract class FuelModule {
                 scopeCache.put(cacheScope, cache);
             }
 
-            contextCache = cache.get(scopeObject);
-            if (contextCache == null) {
+            scopeObjectCache = cache.get(scopeObject);
+            if (scopeObjectCache == null) {
                 if (primeTheCacheEntry) {
-                    contextCache = new HashMap<>();
-                    cache.put(scopeObject, contextCache);
+                    scopeObjectCache = new HashMap<>();
+                    cache.put(scopeObject, scopeObjectCache);
                 }
             }
         }
 
         // Shouldn't be able to prime the cache if not cacheable -- but potential fail
-        if (contextCache == null) {
-            contextCache = Collections.emptyMap();
+        if (scopeObjectCache == null) {
+            scopeObjectCache = Collections.emptyMap();
         }
-        return contextCache;
+        return scopeObjectCache;
     }
 
 
@@ -776,7 +776,7 @@ public abstract class FuelModule {
                                     lazy);
                         }
                         if (object != null) {
-                            putObjectByContextType(lazy, key, object);
+                            putObjectByScopeObject(lazy, key, object);
                         }
                     }
                 }
@@ -838,8 +838,8 @@ public abstract class FuelModule {
         Lock lock = cacheLock.readLock();
         try {
             lock.lock();
-            Map<CacheKey, Object> contextCache = getCacheByContextNotThreadSafe(lazy, false);
-            return contextCache.get(key);
+            Map<CacheKey, Object> scopeObjectCache = getCacheByScopeObjectNotThreadSafe(lazy, false);
+            return scopeObjectCache.get(key);
         } finally {
             lock.unlock();
         }
@@ -848,12 +848,12 @@ public abstract class FuelModule {
     /**
      * @param value instance not lazy, cannot be null
      */
-    void putObjectByContextType(@NonNull Lazy lazy, CacheKey key, Object value) {
+    void putObjectByScopeObject(@NonNull Lazy lazy, CacheKey key, Object value) {
         Lock lock = cacheLock.writeLock();
         try {
             lock.lock();
-            Map<CacheKey, Object> contextCache = getCacheByContextNotThreadSafe(lazy, true);
-            contextCache.put(key, value);
+            Map<CacheKey, Object> scopeObjectCache = getCacheByScopeObjectNotThreadSafe(lazy, true);
+            scopeObjectCache.put(key, value);
         } finally {
             lock.unlock();
         }

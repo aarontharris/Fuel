@@ -12,6 +12,7 @@ import androidx.annotation.MainThread;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.core.util.Preconditions;
+import androidx.fragment.app.Fragment;
 
 import com.ath.fuel.err.FuelInjectionException;
 import com.ath.fuel.err.FuelInvalidParentException;
@@ -123,7 +124,7 @@ public final class FuelInjector {
             // In the case of a service, we need to plug it into the cache after it calls ignite because we cant construct it
             if (isService(instance.getClass())) {
                 CacheKey key = CacheKey.attain(instance.getClass());
-                getRootModule().putObjectByContextType(lazyInstance, key, instance);
+                getRootModule().putObjectByScopeObject(lazyInstance, key, instance);
             }
             // Don't try to instantiate services
             else {
@@ -140,6 +141,21 @@ public final class FuelInjector {
         } catch (Exception e) {
             throw doFailure(null, e);
         }
+    }
+
+    static final Object SENTINEL = new Object();
+
+    public final @NonNull View igniteViewRoot(@NonNull View view) {
+        view.setTag(R.id.fuel_view_root, SENTINEL);
+        ignite(view);
+        return view;
+    }
+
+    public final @NonNull View igniteViewRootFragment(@NonNull View view, Fragment fragment) {
+        //view.setTag(R.id.fuel_view_root, SENTINEL);
+        FragmentViewMaps.get(view.getContext()).associate(view, fragment);
+        ignite(view.getContext(), fragment);
+        return view;
     }
 
     /**
@@ -245,7 +261,7 @@ public final class FuelInjector {
     final boolean isSingleton(Class<?> leafType) {
         Boolean singleton = isSingletonCache.get(leafType);
         if (singleton == null) {
-            singleton = (isAppSingleton(leafType) || isActivitySingleton(leafType));
+            singleton = (isAppSingleton(leafType) || isActivitySingleton(leafType) || isViewRootSingleton(leafType));
             isSingletonCache.put(leafType, singleton);
         }
         return singleton;
@@ -303,6 +319,18 @@ public final class FuelInjector {
             isContextCache.put(leafType, match);
         }
         return match;
+    }
+
+    boolean isView(Class<?> leafType) {
+        return View.class.isAssignableFrom(leafType);
+    }
+
+    View getFragmentView(Object fragment) {
+        if (fragment instanceof android.app.Fragment) {
+            return ((android.app.Fragment) fragment).getView();
+        }
+        androidx.fragment.app.Fragment f = (androidx.fragment.app.Fragment) fragment;
+        return FragmentViewMaps.get(f.getContext()).lookup(f);
     }
 
     /** reverse lookup to find a Lazy for a previously ignited/injected Object */
@@ -454,7 +482,6 @@ public final class FuelInjector {
             child.scope = parent.scope;
         }
         validateScope(parent.scope, child.scope);
-        child.inheritScopeRef(parent);
 
         if (child.isDebug()) {
             FLog.leaveBreadCrumb("doPreProcessChild for %s, context ended up with %s", child, context.getClass().getSimpleName());
@@ -470,6 +497,12 @@ public final class FuelInjector {
             // ordered by precedence
             if (isActivitySingleton(leafType)) {
                 return Scope.Activity;
+            } else if (isViewRootSingleton(leafType)) {
+                return Scope.ViewRoot;
+            } else if (isView(leafType)) {
+                return Scope.ViewRoot;
+            } else if (isFragment(leafType)) {
+                return Scope.ViewRoot;
             } else if (isActivity(leafType)) {
                 return Scope.Activity;
             } else if (isAppSingleton(leafType)) {
