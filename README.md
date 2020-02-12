@@ -8,7 +8,7 @@ FAST, simple, easy to use and very easy to get started dependency injection fram
 
 ## Other good reads
 * [Compartmentalizing Code](https://medium.com/@aarontharris/compartmentalizing-code-7d96d40b5586)
-* [Sope - Dependency Injection](https://medium.com/@aarontharris/scope-dependency-injection-6fc25beffc9c)
+* [Scope - Dependency Injection](https://medium.com/@aarontharris/scope-dependency-injection-6fc25beffc9c)
 
 # Fuel Submodule
 Clone the Fuel submodule under your project folder
