@@ -6,6 +6,10 @@ FAST, simple, easy to use and very easy to get started dependency injection fram
 * [Fuel Philosphy](https://github.com/aarontharris/Fuel/wiki#philosophy)
 * [Fuel Performance](https://github.com/aarontharris/Fuel/wiki#performance-metrics)
 
+## Other good reads
+* [Compartmentalizing Code](https://medium.com/@aarontharris/compartmentalizing-code-7d96d40b5586)
+* [Sope - Dependency Injection](https://medium.com/@aarontharris/scope-dependency-injection-6fc25beffc9c)
+
 # Fuel Submodule
 Clone the Fuel submodule under your project folder
 ```
@@ -315,3 +319,5 @@ Don't nest viewroots
 
 Don't double map singeltons
 - Protected
+
+
