@@ -9,20 +9,34 @@ import android.content.Context;
 import android.location.LocationManager;
 import android.net.ConnectivityManager;
 import android.os.Bundle;
-import android.support.annotation.CallSuper;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.widget.AdapterView;
 import android.widget.ArrayAdapter;
+
+import androidx.annotation.CallSuper;
+import androidx.annotation.NonNull;
+import androidx.annotation.Nullable;
+import androidx.collection.SparseArrayCompat;
 
 import com.ath.fuel.err.FuelInjectionBindException;
 import com.ath.fuel.err.FuelInjectionException;
 import com.ath.fuel.err.FuelUnableToObtainInstanceException;
 
 import java.lang.reflect.Constructor;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.WeakHashMap;
+import java.util.concurrent.locks.Lock;
+import java.util.concurrent.locks.ReentrantReadWriteLock;
 
 public abstract class FuelModule {
+
 
     /**
      * Provider is cached with the context associated with the type it returns<br>
@@ -32,7 +46,7 @@ public abstract class FuelModule {
      * @param <T>
      * @author aharris
      */
-    public abstract static class FuelProvider<T> {
+    public interface FuelProvider<T> {
 
         /**
          * Override this method when choosing an injectable depends on runtime state.<br>
@@ -43,109 +57,102 @@ public abstract class FuelModule {
          * @param parent the object that requested injection and will receive the lazy.
          * @return
          */
-        public abstract T provide( Lazy lazy, Object parent );
+        T provide(Lazy lazy, Object parent);
     }
 
-    private final HashMap<Class<?>, Class<?>> classToClassMap = new HashMap<>();
-    private final HashMap<Class<?>, Object> classToObjectMap = new HashMap<>();
-    private final HashMap<Class<?>, FuelProvider> classToProviderMap = new HashMap<>();
-    private Application app;
+    public interface FuelSubmodule {
+        void configure(@NonNull FuelConfigurator module);
+    }
+
+    // Scope -> ScopeObject -> CacheKey -> instance
+    // - Scope is Application, Activity, Fragment, etc
+    // - ScopeObject would be the context, or the fragment, paired to the scope
+    // - CacheKey describes the instance we're looking for
+    // - instance the hidden treasure
+    private static final ReentrantReadWriteLock cacheLock = new ReentrantReadWriteLock();
+    private final Map<Scope, WeakHashMap<Object, Map<CacheKey, Object>>> scopeCache = new HashMap<>();
+    private static final SparseArrayCompat<Class> leafTypeCache = new SparseArrayCompat<>();
+
+    private final @NonNull Map<Class<?>, Class<?>> classToClassMap = new HashMap<>();
+    private final @NonNull Map<Class<?>, Object> classToObjectMap = new HashMap<>();
+    private final @NonNull Map<Class<?>, FuelProvider> classToProviderMap = new HashMap<>();
+    private final @NonNull Set<Class<?>> classMaps = new HashSet<>();
+    private final @NonNull List<FuelSubmodule> submodules = new ArrayList<>();
+    private final @NonNull Application app;
+    private FuelConfigurator fuelConfigurator = null;
 
     /* package private */
     Application.ActivityLifecycleCallbacks localLifecycleCallbacks;
-    Application.ActivityLifecycleCallbacks externalLifecycleCallbacks;
 
-    public FuelModule( Application app ) {
+    public FuelModule(@NonNull Application app) {
         this.app = app;
 
         localLifecycleCallbacks = new Application.ActivityLifecycleCallbacks() {
-            @Override
-            public void onActivityCreated( Activity activity, Bundle savedInstanceState ) {
-                if ( externalLifecycleCallbacks != null ) {
-                    externalLifecycleCallbacks.onActivityCreated( activity, savedInstanceState );
-                }
-                FuelModule.this.onActivityCreated( activity, savedInstanceState );
+            @Override public void onActivityCreated(@NonNull Activity activity, Bundle savedInstanceState) {
+                FuelModule.this.onActivityCreated(activity, savedInstanceState);
             }
 
-            @Override
-            public void onActivityStarted( Activity activity ) {
-                if ( externalLifecycleCallbacks != null ) {
-                    externalLifecycleCallbacks.onActivityStarted( activity );
-                }
-                FuelModule.this.onActivityStarted( activity );
+            @Override public void onActivityStarted(@NonNull Activity activity) {
+                FuelModule.this.onActivityStarted(activity);
             }
 
-            @Override
-            public void onActivityResumed( Activity activity ) {
-                if ( externalLifecycleCallbacks != null ) {
-                    externalLifecycleCallbacks.onActivityResumed( activity );
-                }
-                FuelModule.this.onActivityResumed( activity );
+            @Override public void onActivityResumed(@NonNull Activity activity) {
+                FuelModule.this.onActivityResumed(activity);
             }
 
-            @Override
-            public void onActivityPaused( Activity activity ) {
-                FuelModule.this.onActivityPaused( activity );
-                if ( externalLifecycleCallbacks != null ) {
-                    externalLifecycleCallbacks.onActivityPaused( activity );
-                }
+            @Override public void onActivityPaused(@NonNull Activity activity) {
+                FuelModule.this.onActivityPaused(activity);
             }
 
-            @Override
-            public void onActivityStopped( Activity activity ) {
-                FuelModule.this.onActivityStopped( activity );
-                if ( externalLifecycleCallbacks != null ) {
-                    externalLifecycleCallbacks.onActivityStopped( activity );
-                }
+            @Override public void onActivityStopped(@NonNull Activity activity) {
+                FuelModule.this.onActivityStopped(activity);
             }
 
-            @Override
-            public void onActivitySaveInstanceState( Activity activity, Bundle outState ) {
-                FuelModule.this.onActivitySaveInstanceState( activity, outState );
-                if ( externalLifecycleCallbacks != null ) {
-                    externalLifecycleCallbacks.onActivitySaveInstanceState( activity, outState );
-                }
+            @Override public void onActivitySaveInstanceState(@NonNull Activity activity, @NonNull Bundle outState) {
+                FuelModule.this.onActivitySaveInstanceState(activity, outState);
             }
 
-            @Override
-            public void onActivityDestroyed( Activity activity ) {
-                FuelModule.this.onActivityDestroyed( activity );
-                if ( externalLifecycleCallbacks != null ) {
-                    externalLifecycleCallbacks.onActivityDestroyed( activity );
-                }
+            @Override public void onActivityDestroyed(@NonNull Activity activity) {
+                FuelModule.this.onActivityDestroyed(activity);
             }
         };
-        app.registerActivityLifecycleCallbacks( localLifecycleCallbacks );
+        app.registerActivityLifecycleCallbacks(localLifecycleCallbacks);
     }
 
-    void prepareForDeath() {
-        if ( localLifecycleCallbacks != null ) {
-            app.unregisterActivityLifecycleCallbacks( localLifecycleCallbacks );
-        }
-        if ( externalLifecycleCallbacks != null ) {
-            app.unregisterActivityLifecycleCallbacks( externalLifecycleCallbacks );
+    @CallSuper
+    protected void onPrepareForDeath() { // TODO: Submodule
+        if (localLifecycleCallbacks != null) {
+            app.unregisterActivityLifecycleCallbacks(localLifecycleCallbacks);
         }
     }
 
-    protected void onActivityCreated( Activity activity, Bundle savedInstanceState ) {
+    @CallSuper
+    protected void onActivityCreated(Activity activity, Bundle savedInstanceState) {
     }
 
-    protected void onActivityStarted( Activity activity ) {
+
+    @CallSuper
+    protected void onActivityStarted(Activity activity) {
     }
 
-    protected void onActivityResumed( Activity activity ) {
+    @CallSuper
+    protected void onActivityResumed(Activity activity) {
     }
 
-    protected void onActivityPaused( Activity activity ) {
+    @CallSuper
+    protected void onActivityPaused(Activity activity) {
     }
 
-    protected void onActivityStopped( Activity activity ) {
+    @CallSuper
+    protected void onActivityStopped(Activity activity) {
     }
 
-    protected void onActivitySaveInstanceState( Activity activity, Bundle outState ) {
+    @CallSuper
+    protected void onActivitySaveInstanceState(Activity activity, Bundle outState) {
     }
 
-    protected void onActivityDestroyed( Activity activity ) {
+    @CallSuper
+    protected void onActivityDestroyed(Activity activity) {
     }
 
     /**
@@ -153,31 +160,62 @@ public abstract class FuelModule {
      * For Singletons it should only be once per scope.<br>
      * Only called for Singletons.
      */
-    @CallSuper
-    protected void onObtainNewSingleton( Object instance ) {
+    protected @NonNull <T> T onInstanceCreated(@NonNull Lazy<T> lazy) {
+        return lazy.getInstance();
     }
 
-    void doOnFueled( Lazy lazy, boolean ignite ) {
+    /**
+     * Called when an instance does not have a mapping.<br>
+     * If you don't do something, it's going to fail.<br>
+     * <br>
+     * How did we get here? You are trying to obtain an instance that Fuel<br>
+     * does not know how to construct. Typically this is solved with bindings in the FuelModule.<br>
+     * <br>
+     * For an easy way out you have some options:<br>
+     * <pre>
+     * bindReflectively( MyObject.class ); // in your FuelModule <br>
+     * </pre>
+     * <br>
+     * Or override this method in your FuelModule:<br>
+     * <pre>
+     * Object onInstanceUnattainable( Lazy lazy ) {
+     *     return REFLECTIVE_PROVIDER.provide( lazy.getLeafType() );
+     * }
+     * </pre>
+     * Or override and throw an error to fully unsupport reflective attain.<br>
+     * Note individual use via bindReflectively() will still be enabled.
+     */
+    protected @Nullable <T> T onInstanceUnattainable(@NonNull Lazy<T> lazy) {
+        FLog.w("Fuel is forced to use reflection to obtain: '"
+                + lazy.getLeafType()
+                + "'. This is because no mapping has been provided. " +
+                "For more info see FuelModule.onInstanceUnattainable()");
+
+        //noinspection unchecked
+        return (T) REFLECTIVE_PROVIDER.provide(lazy, null);
+    }
+
+    void doOnFueled(Lazy lazy, boolean ignite) {
         try {
             // pre-conditions and exemptions
-            if ( lazy == null || lazy.getInstance() == null ) {
+            if (lazy == null || lazy.getInstance() == null) {
                 return;
-            } else if ( lazy.onFueledCalled ) {
+            } else if (lazy.onFueledCalled) {
                 return;
-            } else if ( !( lazy.getInstance() instanceof OnFueled ) ) {
+            } else if (!(lazy.getInstance() instanceof OnFueled)) {
                 return;
-            } else if ( ignite ) { // white-list ignites, ignoring singleton or reqInj
+            } else if (ignite) { // white-list ignites, ignoring singleton or reqInj
                 // continue
-            } else if ( FuelInjector.isSingleton( lazy.leafType ) ) { // TODO: could totally cache lazy.isSingleton ... later.
+            } else if (FuelInjector.get().isSingleton(lazy.getLeafType())) { // TODO: could totally cache lazy.isSingleton ... later.
                 // continue
-            } else if ( !FuelInjector.isInjectionRequired( lazy.leafType ) ) {
+            } else if (!FuelInjector.get().isInjectionRequired(lazy.getLeafType())) {
                 // continue
             }
 
             lazy.onFueledCalled = true;
-            ( (OnFueled) lazy.getInstance() ).onFueled();
-        } catch ( Exception e ) {
-            FLog.e( e );
+            ((OnFueled) lazy.getInstance()).onFueled();
+        } catch (Exception e) {
+            FLog.e(e);
         }
     }
 
@@ -188,7 +226,7 @@ public abstract class FuelModule {
      * @param lazy      the culprit
      * @param exception what went wrong
      */
-    protected void onFailure( Lazy lazy, FuelInjectionException exception ) {
+    protected void onFailure(@Nullable Lazy lazy, @NonNull FuelInjectionException exception) {
         throw exception;
     }
 
@@ -204,22 +242,22 @@ public abstract class FuelModule {
      * @return null if unable to map to a context
      */
     @CallSuper
-    protected Context provideContext( Object object ) {
-        if ( object != null ) {
-            if ( object instanceof Application ) {
-                return FuelInjector.getApp(); // may be null if not initialized
-            } else if ( object instanceof Service ) {
-                return FuelInjector.getApp(); // may be null if not initialized
-            } else if ( object instanceof Activity ) {
+    protected Context provideContext(Object object) {
+        if (object != null) {
+            if (object instanceof Application) {
+                return FuelInjector.get().getApp(); // may be null if not initialized
+            } else if (object instanceof Service) {
+                return FuelInjector.get().getApp(); // may be null if not initialized
+            } else if (object instanceof Activity) {
                 return (Activity) object;
-            } else if ( object instanceof View ) {
-                return ( (View) object ).getContext();
-            } else if ( object instanceof ArrayAdapter ) {
-                return FuelInjector.toContext( ( (ArrayAdapter) object ).getContext() );
-            } else if ( object instanceof AdapterView ) {
-                return FuelInjector.toContext( ( (AdapterView) object ).getContext() );
-            } else if ( FuelInjector.isAppSingleton( object.getClass() ) ) {
-                return FuelInjector.getApp(); // may be null if not initialized
+            } else if (object instanceof View) {
+                return ((View) object).getContext();
+            } else if (object instanceof ArrayAdapter) {
+                return FuelInjector.get().toContext(((ArrayAdapter) object).getContext());
+            } else if (object instanceof AdapterView) {
+                return FuelInjector.get().toContext(((AdapterView) object).getContext());
+            } else if (FuelInjector.get().isAppSingleton(object.getClass())) {
+                return FuelInjector.get().getApp(); // may be null if not initialized
             }
         }
         return null;
@@ -237,43 +275,43 @@ public abstract class FuelModule {
      * @return null if unable to map to a context
      */
     @CallSuper
-    protected final Context provideContext( Class<?> type ) {
-        if ( type != null ) {
-            if ( FuelInjector.isApplication( type ) ) {
-                return FuelInjector.getApp(); // may be null if not initialized
-            } else if ( FuelInjector.isService( type ) ) {
-                return FuelInjector.getApp(); // may be null if not initialized
-            } else if ( FuelInjector.isAppSingleton( type ) ) {
-                return FuelInjector.getApp(); // may be null if not initialized
+    protected final Context provideContext(Class<?> type) {
+        if (type != null) {
+            if (FuelInjector.get().isApplication(type)) {
+                return FuelInjector.get().getApp(); // may be null if not initialized
+            } else if (FuelInjector.get().isService(type)) {
+                return FuelInjector.get().getApp(); // may be null if not initialized
+            } else if (FuelInjector.get().isAppSingleton(type)) {
+                return FuelInjector.get().getApp(); // may be null if not initialized
             }
         }
         return null;
     }
 
-    protected void logD( String message ) {
-        android.util.Log.d( FLog.TAG, message );
+    protected void logD(String message) {
+        android.util.Log.d(FLog.TAG, message);
     }
 
-    protected void logW( String message ) {
-        android.util.Log.w( FLog.TAG, message );
+    protected void logW(String message) {
+        android.util.Log.w(FLog.TAG, message);
     }
 
-    protected void logE( String message ) {
-        android.util.Log.e( FLog.TAG, message );
+    protected void logE(String message) {
+        android.util.Log.e(FLog.TAG, message);
     }
 
-    protected void logE( String message, Exception e ) {
-        if ( message == null ) {
+    protected void logE(String message, Exception e) {
+        if (message == null) {
             message = "Message: " + e.getMessage();
         }
-        android.util.Log.e( FLog.TAG, message, e );
+        android.util.Log.e(FLog.TAG, message, e);
     }
 
     /**
      * Override to plug fuel into your own analytics system
      */
-    protected void leaveBreadCrumb( String fmt, Object... args ) {
-        android.util.Log.d( FLog.TAG, String.format( fmt, args ) );
+    protected void leaveBreadCrumb(String fmt, Object... args) {
+        android.util.Log.d(FLog.TAG, String.format(fmt, args));
     }
 
     /**
@@ -292,29 +330,29 @@ public abstract class FuelModule {
      *   {@link Application} -- Will only inject Application, unlike Context
      * </pre>
      */
-    protected void configure() {
+    protected void configure(@NonNull Application app) {
         // Services
-        bind( LayoutInflater.class, getApplication().getSystemService( Context.LAYOUT_INFLATER_SERVICE ) );
-        bind( ConnectivityManager.class, getApplication().getSystemService( Context.CONNECTIVITY_SERVICE ) );
-        bind( AlarmManager.class, getApplication().getSystemService( Context.ALARM_SERVICE ) );
-        bind( LocationManager.class, getApplication().getSystemService( Context.LOCATION_SERVICE ) );
-        bind( NotificationManager.class, getApplication().getSystemService( Context.NOTIFICATION_SERVICE ) );
+        bind(LayoutInflater.class, getApplication().getSystemService(Context.LAYOUT_INFLATER_SERVICE));
+        bind(ConnectivityManager.class, getApplication().getSystemService(Context.CONNECTIVITY_SERVICE));
+        bind(AlarmManager.class, getApplication().getSystemService(Context.ALARM_SERVICE));
+        bind(LocationManager.class, getApplication().getSystemService(Context.LOCATION_SERVICE));
+        bind(NotificationManager.class, getApplication().getSystemService(Context.NOTIFICATION_SERVICE));
     }
 
     public void printBindings() {
         // FLog.d( "C2O Mapping: " );
-        for ( Class c : classToObjectMap.keySet() ) {
-            FLog.d( " -- C2O Mapping: %s -> %s", c, classToObjectMap.get( c ) );
+        for (Class c : classToObjectMap.keySet()) {
+            FLog.d(" -- C2O Mapping: %s -> %s", c, classToObjectMap.get(c));
         }
 
         // FLog.d( "C2P Mapping: " );
-        for ( Class c : classToProviderMap.keySet() ) {
-            FLog.d( " -- C2P Mapping: %s -> %s", c, classToProviderMap.get( c ) == null ? "Null" : "Provider" );
+        for (Class c : classToProviderMap.keySet()) {
+            FLog.d(" -- C2P Mapping: %s -> %s", c, classToProviderMap.get(c) == null ? "Null" : "Provider");
         }
 
         // FLog.d( "C2C Mapping: " );
-        for ( Class c : classToClassMap.keySet() ) {
-            FLog.d( " -- C2C Mapping: %s -> %s", c, classToClassMap.get( c ) );
+        for (Class c : classToClassMap.keySet()) {
+            FLog.d(" -- C2C Mapping: %s -> %s", c, classToClassMap.get(c));
         }
     }
 
@@ -338,19 +376,20 @@ public abstract class FuelModule {
      * @param from
      * @param to
      */
-    protected void bind( Class<?> from, Class<?> to ) {
-        if ( FuelInjector.isDebug() ) {
-            if ( from == null ) {
-                throw new FuelInjectionBindException( "bind failure baseType cannot be null" );
+    protected void bind(Class<?> from, Class<?> to) {
+        if (FuelInjector.get().isDebug()) {
+            if (from == null) {
+                throw new FuelInjectionBindException("bind failure baseType cannot be null");
             }
-            if ( to == null ) {
-                throw new FuelInjectionBindException( "bind failure cannot bind %s to a null instance", from );
+            if (to == null) {
+                throw new FuelInjectionBindException("bind failure cannot bind %s to a null instance", from);
             }
-            if ( !from.isAssignableFrom( to ) ) {
-                throw new FuelInjectionBindException( "bind failure %s is not derived from %s", to, from );
+            if (!from.isAssignableFrom(to)) {
+                throw new FuelInjectionBindException("bind failure %s is not derived from %s", to, from);
             }
         }
-        classToClassMap.put( from, to );
+        classToClassMap.put(from, to);
+        bindCheckForDupes(from);
     }
 
     /**
@@ -363,20 +402,21 @@ public abstract class FuelModule {
      * @param to
      * @see #bind(Class, Class)
      */
-    protected void bind( Class<?> from, Object to ) {
-        if ( FuelInjector.isDebug() ) {
-            if ( from == null ) {
-                throw new FuelInjectionBindException( "bind failure baseType cannot be null" );
+    protected void bind(Class<?> from, @NonNull Object to) {
+        if (FuelInjector.get().isDebug()) {
+            if (from == null) {
+                throw new FuelInjectionBindException("bind failure baseType cannot be null");
             }
-            if ( to == null ) {
-                throw new FuelInjectionBindException( "bind failure cannot bind %s to a null instance", from );
+            if (to == null) {
+                throw new FuelInjectionBindException("bind failure cannot bind %s to a null instance", from);
             }
-            if ( !from.isAssignableFrom( to.getClass() ) ) {
-                throw new FuelInjectionBindException( "bind failure %s is not derived from %s", to.getClass(), from );
+            if (!from.isAssignableFrom(to.getClass())) {
+                throw new FuelInjectionBindException("bind failure %s is not derived from %s", to.getClass(), from);
             }
         }
-        classToObjectMap.put( from, to );
-        classToObjectMap.put( to.getClass(), to );
+        classToObjectMap.put(from, to);
+        // classToObjectMap.put(to.getClass(), to);
+        bindCheckForDupes(from);
     }
 
     /**
@@ -389,125 +429,169 @@ public abstract class FuelModule {
      * @param to
      * @see #bind(Class, Class)
      */
-    protected void bind( Class<?> from, FuelProvider to ) {
-        if ( FuelInjector.isDebug() ) {
-            if ( from == null ) {
-                throw new FuelInjectionBindException( "bind failure baseType cannot be null" );
+    protected <BASE, DERIVED extends BASE> void bind(Class<BASE> from, FuelProvider<DERIVED> to) {
+        if (FuelInjector.get().isDebug()) {
+            if (from == null) {
+                throw new FuelInjectionBindException("bind failure baseType cannot be null");
             }
         }
-        classToProviderMap.put( from, to );
+        classToProviderMap.put(from, to);
+        bindCheckForDupes(from);
+    }
+
+    protected void bindReflectively(Class from) {
+        classToProviderMap.put(from, REFLECTIVE_PROVIDER);
+        bindCheckForDupes(from);
+    }
+
+    private void bindCheckForDupes(Class from) {
+        FLog.d("Hi");
+        if (classMaps.contains(from)) {
+            onDuplicateBindingFound(from);
+        }
+        classMaps.add(from);
+    }
+
+    protected void onDuplicateBindingFound(Class from) {
+        FLog.w("WARN: " + from.getCanonicalName() + "has already been mapped");
+    }
+
+    protected void addModule(@NonNull FuelSubmodule submodule) {
+        if (fuelConfigurator == null) {
+            fuelConfigurator = new FuelConfigurator(this);
+        }
+        submodule.configure(fuelConfigurator);
+        submodules.add(submodule);
     }
 
     Application getApplication() {
         return app;
     }
 
-    /**
-     * Unregisters old callbacks if any
-     *
-     * @param lifecycleCallbacks
-     */
-    void setActivityCallbacks( Application.ActivityLifecycleCallbacks lifecycleCallbacks ) {
-        if ( this.externalLifecycleCallbacks != null ) {
-            app.unregisterActivityLifecycleCallbacks( this.externalLifecycleCallbacks );
-        }
-
-        this.externalLifecycleCallbacks = lifecycleCallbacks;
-    }
-
     // FIXME: consider other mappings above
     // FIXME: cleanup exceptions
+
+    public final @NonNull FuelProvider REFLECTIVE_PROVIDER = new FuelProvider() {
+        @Override public Object provide(Lazy lazy, Object parent) {
+            return newInstance(FuelModule.this, lazy);
+        }
+    };
 
     /**
      * Get an instance based on the FuelModule configure map and the given type
      */
-    Object obtainInstance( Lazy lazy, boolean allowAnonymousNewInstance ) throws FuelInjectionException {
+    Object obtainInstance(Lazy lazy, boolean allowAnonymousNewInstance) throws FuelInjectionException {// FIXME: Submodule
         try {
-            Class<?> leafType = lazy.leafType;
+            Class<?> leafType = lazy.getLeafType();
 
             // First try direct object map
-            Object obj = classToObjectMap.get( leafType );
-            if ( obj != null ) {
-                if ( lazy.isDebug() ) {
-                    FLog.leaveBreadCrumb( "obtainInstance got %s", obj.getClass().getSimpleName() );
+            Object obj = classToObjectMap.get(leafType);
+            if (obj != null) {
+                if (lazy.isDebug()) {
+                    FLog.leaveBreadCrumb("obtainInstance got %s", obj.getClass().getSimpleName());
                 }
                 return obj;
             }
 
             // Second try provider map
-            FuelProvider<?> provider = classToProviderMap.get( leafType );
-            if ( provider != null ) {
-                lazy.setInstance( provider.provide( lazy, lazy.getParent() ) );
-                if ( lazy.isDebug() ) {
-                    FLog.leaveBreadCrumb( "obtainInstance provider provided instance for lazy - %s", lazy );
+            FuelProvider<?> provider = classToProviderMap.get(leafType);
+            if (provider != null) {
+                //noinspection unchecked
+                lazy.setInstance(provider.provide(lazy, lazy.getParent()));
+                if (lazy.isDebug()) {
+                    FLog.leaveBreadCrumb("obtainInstance provider provided instance for lazy - %s", lazy);
                 }
-                return initializeNewInstance( lazy );
+                return initializeNewInstance(lazy);
             }
 
             // Third try class to class map
-            Class<?> toType = classToClassMap.get( leafType );
-            if ( toType != null ) {
-                lazy.setInstance( newInstance( lazy ) );
-                if ( lazy.isDebug() ) {
-                    FLog.leaveBreadCrumb( "obtainInstance classToClassMap found instance for lazy - %s", lazy );
+            Class<?> toType = classToClassMap.get(leafType);
+            if (toType != null) {
+                //noinspection unchecked
+                lazy.setInstance(onInstanceUnattainable(lazy));
+                if (lazy.isDebug()) {
+                    FLog.leaveBreadCrumb("obtainInstance classToClassMap found instance for lazy - %s", lazy);
                 }
-                return initializeNewInstance( lazy );
+                return initializeNewInstance(lazy);
             }
 
-            if ( FuelInjector.isSingleton( leafType ) ) {
-                lazy.setInstance( newInstance( lazy ) );
-                if ( lazy.isDebug() ) {
-                    FLog.leaveBreadCrumb( "obtainInstance other/ActivitySingleton/AppSingleton new instance returned instance for lazy - %s", lazy );
+            if (FuelInjector.get().isSingleton(leafType)) {
+                //noinspection unchecked
+                lazy.setInstance(onInstanceUnattainable(lazy));
+                if (lazy.isDebug()) {
+                    FLog.leaveBreadCrumb("obtainInstance other/ActivitySingleton/AppSingleton new instance returned instance for lazy - %s", lazy);
                 }
-                return initializeNewInstance( lazy );
+                return initializeNewInstance(lazy);
             }
 
             // Last (no mapping) and not special, try to instantiate the literal type they requested
-            if ( allowAnonymousNewInstance ) {
-                lazy.setInstance( newInstance( lazy ) );
-                if ( lazy.isDebug() ) {
-                    FLog.leaveBreadCrumb( "obtainInstance allowAnonymousNewInstance new instance for lazy %s", lazy );
+            if (allowAnonymousNewInstance) {
+                //noinspection unchecked
+                lazy.setInstance(onInstanceUnattainable(lazy));
+                if (lazy.isDebug()) {
+                    FLog.leaveBreadCrumb("obtainInstance allowAnonymousNewInstance new instance for lazy %s", lazy);
                 }
-                return initializeNewInstance( lazy );
+                return initializeNewInstance(lazy);
             }
-        } catch ( Exception e ) {
-            if ( lazy.isDebug() ) {
-                FLog.leaveBreadCrumb( "obtainInstance Exception %s", e.getMessage() );
+        } catch (Exception e) {
+            if (lazy.isDebug()) {
+                FLog.leaveBreadCrumb("obtainInstance Exception %s", e.getMessage());
             }
-            FuelInjector.doFailure( lazy, new FuelUnableToObtainInstanceException( e ) );
+            FuelInjector.get().doFailure(lazy, new FuelUnableToObtainInstanceException(e));
         }
-        if ( lazy.isDebug() ) {
-            FLog.leaveBreadCrumb( "obtainInstance fell through to return null" );
+        if (lazy.isDebug()) {
+            FLog.leaveBreadCrumb("obtainInstance fell through to return null");
         }
-        return null; // FIXME: probably shouldn't ever return null? probably throw?
+        return null; // Null eventually gets caught by Lazy.get() and throws... meh...
     }
 
-    Object newInstance( Lazy lazy ) throws FuelInjectionException {
+    /**
+     * Obtain an instance via Reflection.<br>
+     * <br>
+     * NOTE:<br>
+     * This is only used when Type-Mapping was not provided in your FuelModule.<br>
+     * A warning is logged and the instance is provided.<br>
+     * <br>
+     *
+     * @see #onInstanceUnattainable(Lazy) for details on turning this off, or embracing it<br>
+     * <br>
+     * How does it work?<br>
+     * Fuel will try to obtain the simplist constructor available.<br>
+     * If you inject something that has a no-arg constructor, that will always take precedence.<br>
+     * If this is not what you want, use a {@link FuelProvider}.<br>
+     * <br>
+     * If the only constructors take parameters, and those parameters can be obtained by Fuel<br>
+     * via mapping or reflection, then an object will be provided.<br>
+     * If any of the requested parameters in the constructor cannot be provided by Fuel, an error will be thrown.<br>
+     * <br>
+     * For best practice, use Mapping & Providers to construct objects.<br>
+     */
+    private Object newInstance(@NonNull FuelModule module, @NonNull Lazy lazy) throws FuelInjectionException {
         try {
 
-            if ( lazy.isDebug() ) {
-                FLog.leaveBreadCrumb( "newInstance for %s", lazy );
+            if (lazy.isDebug()) {
+                FLog.leaveBreadCrumb("newInstance for %s", lazy);
             }
 
             // FLog.d( "New Instance %s @ %s", leafType, context );
             try {
-                return lazy.leafType.newInstance();
-            } catch ( Exception e ) {
-                if ( lazy.isDebug() ) {
-                    FLog.leaveBreadCrumb( "newInstance no empty constructor for %s", lazy );
+                return lazy.getLeafType().newInstance();
+            } catch (Exception e) {
+                if (lazy.isDebug()) {
+                    FLog.leaveBreadCrumb("newInstance no empty constructor for %s", lazy);
                 }
                 // FLog.d( "No Empty Constructor for '%s'", leafType );
             }
 
-            final Class<?> leafType = lazy.leafType;
+            final Class<?> leafType = lazy.getLeafType();
             final Context context = lazy.getContext();
 
             Constructor[] constructors = leafType.getConstructors();
-            if ( constructors.length == 0 ) {
-                if ( lazy.isDebug() ) {
-                    FLog.leaveBreadCrumb( "newInstance no constructors for %s", lazy );
+            if (constructors.length == 0) {
+                if (lazy.isDebug()) {
+                    FLog.leaveBreadCrumb("newInstance no constructors for %s", lazy);
                 }
-                throw new Exception( "No constructors available for " + leafType + " maybe you need to provide FuelMapping?" );
+                throw new Exception("No constructors available for " + leafType + " maybe you need to provide FuelMapping?");
             }
             Constructor ctor = constructors[0];
             // FLog.d( " -- found constructor with args" );
@@ -516,61 +600,61 @@ public abstract class FuelModule {
 
             int len = parameterTypes.length;
             Object[] args = new Object[len];
-            for ( int i = 0; i < len; i++ ) {
+            for (int i = 0; i < len; i++) {
                 Class type = parameterTypes[i];
                 // FLog.d( " -- -- resolving %s", type );
 
-                Class toType = getType( type, CacheKey.DEFAULT_FLAVOR ); // FIXME: FUEL args should support flavors
+                Class toType = getType(type, CacheKey.DEFAULT_FLAVOR); // FIXME: FUEL args should support flavors
 
-                CacheKey key = CacheKey.attain( toType );
-                Object o = FuelInjector.getInstance( context, key, lazy, lazy.isDebug() );
-                if ( o == null ) {
+                CacheKey key = CacheKey.attain(toType);
+                Object o = getInstance(context, key, lazy, lazy.isDebug());
+                if (o == null) {
                     // here we say false because we dont want to allow non mapped or non singletons to be instantiated for constructor args.
                     // If a constructor takes an Integer as an argument, do you think its expecting a new Integer() ? probably not
                     // but if you want to make exceptions for stuff you can call it out in the FuelModule with markAsInjectable().
-                    o = FuelInjector.newInstance( key, Lazy.attain( context, toType ), false );
+                    o = newInstance(key, Lazy.attain(context, toType), false);
                 }
 
-                if ( o != null ) {
+                if (o != null) {
                     args[i] = o;
                 } else {
-                    if ( lazy.isDebug() ) {
-                        FLog.leaveBreadCrumb( "newInstance unable to instantiate for %s", lazy );
+                    if (lazy.isDebug()) {
+                        FLog.leaveBreadCrumb("newInstance unable to instantiate for %s", lazy);
                     }
                     throw new FuelInjectionException(
                             "Unable to instantiate %s -- cannot satisfy argument %s, maybe they're not singletons or not mapped or marked as " +
                                     "Injectable?",
-                            leafType, type );
+                            leafType, type);
                 }
             }
             // FLog.d( " -- found and instantiating... %s", ctor );
-            Object inst = ctor.newInstance( args );
+            Object inst = ctor.newInstance(args);
             // FLog.d( " -- found and instantiating... success %s", ctor );
-            if ( inst != null ) {
+            if (inst != null) {
                 // FLog.d( " -- found and instantiating... success and not null %s", ctor );
                 // FLog.w( "WARNING: Injecting with ambiguous constructor is dangerous: %s", leafType );
                 // FLog.d( " -- found and instantiating... success and not null returning it %s", ctor );
-                if ( lazy.isDebug() ) {
-                    FLog.leaveBreadCrumb( "newInstance got instance for %s", lazy );
+                if (lazy.isDebug()) {
+                    FLog.leaveBreadCrumb("newInstance got instance for %s", lazy);
                 }
                 return inst;
             }
 
-        } catch ( FuelInjectionException e ) {
-            if ( lazy.isDebug() ) {
-                FLog.leaveBreadCrumb( "newInstance FIException %s", e.getMessage() );
+        } catch (FuelInjectionException e) {
+            if (lazy.isDebug()) {
+                FLog.leaveBreadCrumb("newInstance FIException %s", e.getMessage());
             }
             throw e;
-        } catch ( Exception e ) {
-            if ( lazy.isDebug() ) {
-                FLog.leaveBreadCrumb( "newInstance Exception %s", e.getMessage() );
+        } catch (Exception e) {
+            if (lazy.isDebug()) {
+                FLog.leaveBreadCrumb("newInstance Exception %s", e.getMessage());
             }
-            throw new FuelInjectionException( e );
+            throw new FuelInjectionException(e);
         }
-        if ( lazy.isDebug() ) {
-            FLog.leaveBreadCrumb( "newInstance Unable to instantiate %s", lazy );
+        if (lazy.isDebug()) {
+            FLog.leaveBreadCrumb("newInstance Unable to instantiate %s", lazy);
         }
-        throw new FuelInjectionException( "Unable to instantiate %s", lazy );
+        throw new FuelInjectionException("Unable to instantiate %s", lazy);
     }
 
     /**
@@ -578,15 +662,18 @@ public abstract class FuelModule {
      * @return
      * @throws Exception
      */
-    Object initializeNewInstance( Lazy lazy ) throws Exception {
-        if ( lazy.isDebug() ) {
-            FLog.leaveBreadCrumb( "initializeNewInstance for %s", lazy );
+    Object initializeNewInstance(Lazy lazy) throws Exception {
+        if (lazy.isDebug()) {
+            FLog.leaveBreadCrumb("initializeNewInstance for %s", lazy);
         }
-        FuelInjector.doPostProcess( lazy );
+        FuelInjector.get().doPostProcess(lazy);
 
-        doOnFueled( lazy, false );
-        if ( FuelInjector.isSingleton( lazy.leafType ) ) { // TODO: could totally cache lazy.isSingleton ... later.
-            onObtainNewSingleton( lazy.getInstance() );
+        doOnFueled(lazy, false);
+        if (FuelInjector.get().isSingleton(lazy.getLeafType())) { // TODO: could totally cache lazy.isSingleton ... later.
+            Object obj = onInstanceCreated(lazy);
+            if (lazy.getInstance() != obj) {
+                lazy.setInstance(obj);
+            }
         }
         return lazy.getInstance();
     }
@@ -604,23 +691,263 @@ public abstract class FuelModule {
      * @param <T>
      * @return
      */
-    <T> Class<? extends T> getType( Class<T> baseType, Integer flavor ) { // Must stay logically paired with obtainInstance -- not super cool but ... for now.
-        Object obj = classToObjectMap.get( baseType );
-        if ( obj != null ) {
-            return (Class<? extends T>) obj.getClass();
+    // Must stay logically paired with obtainInstance -- not super cool but ... for now.
+    @NonNull <T> Class<? extends T> getType(Class<T> baseType, Integer flavor) {
+        Object obj = classToObjectMap.get(baseType);
+        if (obj != null) {
+            //noinspection unchecked
+            return (Class<? extends T>) obj.getClass(); // reaching an instance is the end of a trail.
         }
 
-        FuelProvider<?> provider = classToProviderMap.get( baseType );
-        if ( provider != null ) {
-            return baseType;
+        FuelProvider<?> provider = classToProviderMap.get(baseType);
+        if (provider != null) {
+            return baseType; // reaching a provider is the end of the trail.
         }
 
-        Class<?> toType = classToClassMap.get( baseType );
-        if ( toType != null ) {
-            return (Class<? extends T>) getType( toType, flavor ); // Recursive check
+        Class<?> toType = classToClassMap.get(baseType);
+        if (toType != null) {
+            return (Class<? extends T>) getType(toType, flavor); // Recursive check
         }
 
-        return baseType;
+        return baseType; // no further mappings -- must be the end of the trail.
     }
 
+    /**
+     * @param primeTheCacheEntry if true, an empty entry will be added for this context if not already present, false leaves it alone and returns
+     *                           empty
+     * @return an "immutable" map when primeTheCachEntry = false :/ meh
+     */
+    Map<CacheKey, Object> getCacheByScopeObjectNotThreadSafe(@NonNull Lazy lazy, boolean primeTheCacheEntry) { // FIXME: Submodule
+        Map<CacheKey, Object> scopeObjectCache = null;
+        Scope cacheScope = lazy.toCacheScope();
+        Object scopeObject = lazy.toObjectScope();
+
+        // if either are null then this lazy is not cacheable
+        if (cacheScope != null && scopeObject != null) {
+            WeakHashMap<Object, Map<CacheKey, Object>> cache = scopeCache.get(cacheScope);
+            if (cache == null) {
+                cache = new WeakHashMap<>();
+                scopeCache.put(cacheScope, cache);
+            }
+
+            scopeObjectCache = cache.get(scopeObject);
+            if (scopeObjectCache == null) {
+                if (primeTheCacheEntry) {
+                    scopeObjectCache = new HashMap<>();
+                    cache.put(scopeObject, scopeObjectCache);
+                }
+            }
+        }
+
+        // Shouldn't be able to prime the cache if not cacheable -- but potential fail
+        if (scopeObjectCache == null) {
+            scopeObjectCache = Collections.emptyMap();
+        }
+        return scopeObjectCache;
+    }
+
+
+    final @NonNull <T> Class<? extends T> toLeafType(@NonNull Class<T> type, Integer flavor) {
+        if (flavor == null) {
+            Class leafType = leafTypeCache.get(type.hashCode());
+            if (leafType == null) {
+                leafType = getType(type, null);
+                leafTypeCache.put(type.hashCode(), leafType);
+            }
+            return leafType;
+        }
+        return getType(type, flavor);
+    }
+
+
+    @NonNull FuelModule findModule(@NonNull Lazy<?> lazy) {
+        return FuelInjector.get().getRootModule();
+    }
+
+
+    // safe because we hash by type
+    @SuppressWarnings("unchecked") final <T> T newInstance(CacheKey key, @NonNull Lazy lazy, boolean allowAnonymousNewInstance) throws FuelInjectionException {
+        try {
+            T object = null;
+            if (lazy.isSingleton()) {
+                if (lazy.isDebug()) {
+                    FLog.leaveBreadCrumb("newInstance for singleton %s", lazy);
+                }
+                synchronized (lazy.getLeafType()) {
+                    object = (T) getObjectByContextType(lazy, key);
+                    if (lazy.isDebug()) {
+                        FLog.leaveBreadCrumb("newInstance getObjectByContextType returned %s for %s",
+                                object == null ? "null" : object.getClass().getSimpleName(),
+                                lazy);
+                    }
+                    if (object == null) { // safety check in case another thread did the work while we were waiting
+                        object = (T) obtainInstance(lazy, allowAnonymousNewInstance);
+                        if (lazy.isDebug()) {
+                            FLog.leaveBreadCrumb("newInstance obtainInstance returned %s for %s",
+                                    object == null ? "null" : object.getClass().getSimpleName(),
+                                    lazy);
+                        }
+                        if (object != null) {
+                            putObjectByScopeObject(lazy, key, object);
+                        }
+                    }
+                }
+            } else {
+                if (lazy.isDebug()) {
+                    FLog.leaveBreadCrumb("newInstance for non-singleton leaf: %s, type: %s",
+                            lazy.getLeafType() == null ? "null" : lazy.getLeafType().getSimpleName(),
+                            lazy);
+                }
+                object = (T) obtainInstance(lazy, allowAnonymousNewInstance);
+            }
+            if (lazy.isDebug()) {
+                FLog.leaveBreadCrumb("newInstance returning %s for leaf type of lazy: %s",
+                        object == null ? "null" : object.getClass().getSimpleName(), lazy);
+            }
+            return object;
+        } catch (FuelInjectionException e) {
+            throw e;
+        } catch (Exception e) {
+            if (lazy.isDebug()) {
+                FLog.leaveBreadCrumb("newInstance Exception %s", e.getMessage());
+            }
+            throw new FuelInjectionException(e);
+        }
+    }
+
+
+    final <T> T attainInstance(CacheKey key, @NonNull Lazy<T> lazy, boolean allowAnonymousNewInstance) throws FuelInjectionException {
+        try {
+            if (lazy.isDebug()) {
+                FLog.leaveBreadCrumb("attainInstance for key: %s and lazy: %s", key, lazy);
+            }
+
+            T obj = getInstance(lazy.getContext(), key, lazy, lazy.isDebug()); // go into getInstance here. grrrr.
+            if (lazy.isDebug()) {
+                FLog.leaveBreadCrumb("attainInstance getInstance returned %s", obj == null ? "null" : obj.getClass().getSimpleName());
+            }
+
+            if (obj == null) {
+                obj = newInstance(key, lazy, allowAnonymousNewInstance);
+            }
+            if (lazy.isDebug()) {
+                FLog.leaveBreadCrumb("attainInstance ended up with %s", obj == null ? "null" : obj.getClass().getSimpleName());
+            }
+            return obj;
+        } catch (FuelInjectionException e) {
+            throw FuelInjector.get().doFailure(lazy, e);
+        } catch (Exception e) {
+            if (lazy.isDebug()) {
+                FLog.leaveBreadCrumb("attainInstance Exception: %s", e.getMessage());
+            }
+            throw FuelInjector.get().doFailure(lazy, e);
+        }
+    }
+
+
+    private @Nullable Object getObjectByContextType(@Nullable Lazy lazy, CacheKey key) {
+        if (lazy == null) return null;
+        Lock lock = cacheLock.readLock();
+        try {
+            lock.lock();
+            Map<CacheKey, Object> scopeObjectCache = getCacheByScopeObjectNotThreadSafe(lazy, false);
+            return scopeObjectCache.get(key);
+        } finally {
+            lock.unlock();
+        }
+    }
+
+    /**
+     * @param value instance not lazy, cannot be null
+     */
+    void putObjectByScopeObject(@NonNull Lazy lazy, CacheKey key, Object value) {
+        Lock lock = cacheLock.writeLock();
+        try {
+            lock.lock();
+            Map<CacheKey, Object> scopeObjectCache = getCacheByScopeObjectNotThreadSafe(lazy, true);
+            scopeObjectCache.put(key, value);
+        } finally {
+            lock.unlock();
+        }
+    }
+
+    final @Nullable <T> T getInstance(@NonNull Context context, @NonNull CacheKey key, @Nullable Lazy lazy, boolean debug) {
+        if (FuelInjector.get().isApplication(key.getLeafType())) {
+            if (debug) {
+                FLog.leaveBreadCrumb("getInstance for App got %s", FuelInjector.get().getApp().getClass().getSimpleName());
+            }
+            //noinspection unchecked
+            return (T) FuelInjector.get().getApp();
+        } else if (FuelInjector.get().isActivity(key.getLeafType()) && context instanceof Activity) {
+            if (debug) {
+                FLog.leaveBreadCrumb("getInstance for Activity got %s", context.getClass().getSimpleName());
+            }
+            //noinspection unchecked
+            return (T) context;
+        } else if (FuelInjector.get().isService(key.getLeafType())) {
+            final T serviceInstance = getServiceInstance(lazy, key, true);
+            if (debug) {
+                FLog.leaveBreadCrumb("getInstance for Service got %s", serviceInstance == null ? "null" : serviceInstance.getClass().getSimpleName());
+            }
+            return serviceInstance;
+        } else if (FuelInjector.get().isContext(key.getLeafType())) {
+            if (debug) {
+                FLog.leaveBreadCrumb("getInstance for Context got %s", context.getClass().getSimpleName());
+            }
+            //noinspection unchecked
+            return (T) context;
+        }
+
+        @SuppressWarnings("unchecked") final T objectByContextType = (T) getObjectByContextType(lazy, key);
+        if (debug) {
+            FLog.leaveBreadCrumb("getInstance getObjectByContextType got %s", objectByContextType == null ? "null" : objectByContextType.getClass().getSimpleName());
+        }
+
+        return objectByContextType;
+    }
+
+    // Currently ignite is talking directly to the cache and is messy :(
+    final <T> T getServiceInstance(Lazy lazy, CacheKey key, boolean willingToWait) {
+        boolean inMainThread = FuelInjector.get().inMainThread();
+        long maxTimeMillis = 1000;
+        long sleepTimeMillis = 20;
+        long startTime = System.currentTimeMillis();
+        int loopCount = 0;
+        long duration = 0;
+        do {
+            try {
+                ++loopCount;
+
+                T object = (T) getObjectByContextType(lazy, key);
+                if (object != null) {
+                    // FLog.d( "SERVICE: getInstance[%s][%s] of %s got %s", loopCount, duration, key.getLeafType().getSimpleName(), object );
+                    return object;
+                }
+
+                if (!inMainThread && willingToWait) {
+                    duration = System.currentTimeMillis() - startTime;
+                    if (duration <= (maxTimeMillis - sleepTimeMillis)) {
+                        try {
+                            Thread.sleep(sleepTimeMillis);
+                        } catch (InterruptedException e) {
+                            FLog.e(e);
+                        }
+                    } else {
+                        // FLog.d( "SERVICE: getInstance[%s][%s] of %s got %s", loopCount, duration, key.getLeafType().getSimpleName(), null );
+                        return null;
+                    }
+                } else {
+                    // most likely a lazy attain but i'm not comfortable with this yet...
+                    // lets test calling lazyService.get() in the main thread -- i hope it will just do everything synchronously and end up with a
+                    // service
+                    // but if not, consider allowing the polling to run for some small amount of time on the main thread?
+                    // FLog.d( "SERVICE: getInstance (Main Thread) of %s got %s", key.getLeafType().getSimpleName(), null );
+                    return null;
+                }
+            } catch (Exception e) {
+                FLog.e(e);
+                return null;
+            }
+        } while (true);
+    }
 }

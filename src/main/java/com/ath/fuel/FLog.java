@@ -1,39 +1,42 @@
 package com.ath.fuel;
 
+import androidx.annotation.NonNull;
+
+@SuppressWarnings("ConstantConditions")
 public class FLog {
     public static final String EMPTY_STRING = "";
     public static String TAG = "FUEL";
 
-    public static final void dSimple( String format, Object... objects ) {
-        if ( FuelInjector.isDebug() ) {
-            aLogD( defaultPrefix() + String.format( format, objects ) );
+    public static final void dSimple(@NonNull String format, Object... objects) {
+        if (FuelInjector.get().isDebug()) {
+            aLogD(defaultPrefix() + String.format(format, objects));
         }
     }
 
-    public static final void t( String format, Object... objects ) {
-        aLogD( defaultPrefix() + String.format( format, objects ) + defaultPostfix() );
+    public static final void t(String format, Object... objects) {
+        aLogD(defaultPrefix() + String.format(format, objects) + defaultPostfix());
     }
 
-    public static final void d( String format, Object... objects ) {
-        if ( FuelInjector.isDebug() ) {
-            aLogD( defaultPrefix() + String.format( format, objects ) + defaultPostfix() );
+    public static final void d(String format, Object... objects) {
+        if (FuelInjector.get().isDebug()) {
+            aLogD(defaultPrefix() + String.format(format, objects) + defaultPostfix());
         }
     }
 
-    public static final void w( String format, Object... objects ) {
-        aLogW( String.format( format, objects ) + defaultPostfix() );
+    public static final void w(String format, Object... objects) {
+        aLogW(String.format(format, objects) + defaultPostfix());
     }
 
-    public static final void e( String format, Object... objects ) {
-        aLogE( defaultPrefix() + String.format( format, objects ) + defaultPostfix() );
+    public static final void e(String format, Object... objects) {
+        aLogE(defaultPrefix() + String.format(format, objects) + defaultPostfix());
     }
 
-    public static final void e( Exception e ) {
-        aLogE( defaultPrefix() + e.getMessage() + defaultPostfix(), e );
+    public static final void e(Exception e) {
+        aLogE(defaultPrefix() + e.getMessage() + defaultPostfix(), e);
     }
 
-    public static final void e( Exception e, String format, Object... objects ) {
-        aLogE( defaultPrefix() + String.format( format, objects ) + defaultPostfix(), e );
+    public static final void e(Exception e, String format, Object... objects) {
+        aLogE(defaultPrefix() + String.format(format, objects) + defaultPostfix(), e);
     }
 
     private static final String defaultPrefix() {
@@ -45,61 +48,56 @@ public class FLog {
         return " {" + getCallingClass() + "@" + getCallingClassLineNumber() + "}";
     }
 
-    private static final void aLogD( String message ) {
-        FuelModule fuelModule = FuelInjector.getFuelModule();
-        if ( fuelModule != null ) {
-            fuelModule.logD( message );
+    private static final void aLogD(String message) {
+        if (FuelInjector.get().isInitialized()) {
+            FuelInjector.get().getRootModule().logD(message);
         } else {
-            android.util.Log.d( TAG, message );
+            android.util.Log.d(TAG, message);
         }
     }
 
-    private static final void aLogW( String message ) {
-        FuelModule fuelModule = FuelInjector.getFuelModule();
-        if ( fuelModule != null ) {
-            fuelModule.logW( message );
+    private static final void aLogW(String message) {
+        if (FuelInjector.get().isInitialized()) {
+            FuelInjector.get().getRootModule().logW(message);
         } else {
-            android.util.Log.w( TAG, message );
+            android.util.Log.w(TAG, message);
         }
     }
 
-    private static final void aLogE( String message ) {
-        FuelModule fuelModule = FuelInjector.getFuelModule();
-        if ( fuelModule != null ) {
-            fuelModule.logE( message );
+    private static final void aLogE(String message) {
+        if (FuelInjector.get().isInitialized()) {
+            FuelInjector.get().getRootModule().logE(message);
         } else {
-            android.util.Log.e( TAG, message );
+            android.util.Log.e(TAG, message);
         }
     }
 
-    private static final void aLogE( String message, Exception e ) {
-        if ( message == null ) {
+    private static final void aLogE(String message, Exception e) {
+        if (message == null) {
             message = "Message: " + e.getMessage();
         }
 
-        FuelModule fuelModule = FuelInjector.getFuelModule();
-        if ( fuelModule != null ) {
-            fuelModule.logE( message, e );
+        if (FuelInjector.get().isInitialized()) {
+            FuelInjector.get().getRootModule().logE(message, e);
         } else {
-            android.util.Log.e( TAG, message );
+            android.util.Log.e(TAG, message);
         }
     }
 
-    public static final void leaveBreadCrumb( String format, Object... objects ) {
+    public static final void leaveBreadCrumb(String format, Object... objects) {
         try {
-            FuelModule fuelModule = FuelInjector.getFuelModule();
-            if ( fuelModule != null ) {
-                fuelModule.leaveBreadCrumb( format, objects );
+            if (FuelInjector.get().isInitialized()) {
+                FuelInjector.get().getRootModule().leaveBreadCrumb(format, objects);
             } else {
-                e( "fuelModule not initialized, BREADCRUMB NOT LOGGED: %s", String.format( format, objects ) );
+                e("fuelModule not initialized, BREADCRUMB NOT LOGGED: %s", String.format(format, objects));
             }
-        } catch ( Exception e ) {
-            e( e, "failed to log breadcrumb" );
+        } catch (Exception e) {
+            e(e, "failed to log breadcrumb");
         }
     }
 
     private static final StackTraceElement getCallingStackElem() {
-        return findStackElem( FLog.class );
+        return findStackElem(FLog.class);
     }
 
     // May appear fairly inefficient but it doesn't need to be, it only needs to be reliable
@@ -111,38 +109,36 @@ public class FLog {
 
     /**
      * Find the first line in the stack trace that follows the given class and isn't the given class.
-     *
-     * @param sentinel
-     * @return
      */
-    public static final StackTraceElement findStackElem( Class<?> sentinel ) {
+    @SuppressWarnings("ConstantConditions")
+    public static final @NonNull StackTraceElement findStackElem(@NonNull Class<?> sentinel) {
         StackTraceElement[] elems = Thread.currentThread().getStackTrace();
         int i = -1;
         boolean foundLog = false;
-        for ( StackTraceElement e : elems ) {
+        for (StackTraceElement e : elems) {
             i++;
 
             // We've not run into Log yet
-            if ( !foundLog && e.getClassName().equals( sentinel.getCanonicalName() ) ) {
+            if (!foundLog && e.getClassName().equals(sentinel.getCanonicalName())) {
                 foundLog = true;
             }
             // We've previously found Log and now we've found something that isn't -- this is what we want
-            else if ( foundLog && !e.getClassName().equals( sentinel.getCanonicalName() ) ) {
+            else if (foundLog && !e.getClassName().equals(sentinel.getCanonicalName())) {
                 break;
             }
         }
-        StackTraceElement elem = elems[i];
-        return elem;
+
+        return elems[i];
     }
 
-    public static final String getSimpleName( StackTraceElement elem ) {
+    public static final String getSimpleName(StackTraceElement elem) {
         String full = elem.getClassName();
-        int pos = full.lastIndexOf( '.' );
-        return full.substring( pos + 1 ); // should be safe, can't see a class name ending with a .
+        int pos = full.lastIndexOf('.');
+        return full.substring(pos + 1); // should be safe, can't see a class name ending with a .
     }
 
     private static final String getCallingClass() {
-        return getSimpleName( getCallingStackElem() );
+        return getSimpleName(getCallingStackElem());
     }
 
     private static final int getCallingClassLineNumber() {

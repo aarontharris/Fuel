@@ -6,6 +6,10 @@ FAST, simple, easy to use and very easy to get started dependency injection fram
 * [Fuel Philosphy](https://github.com/aarontharris/Fuel/wiki#philosophy)
 * [Fuel Performance](https://github.com/aarontharris/Fuel/wiki#performance-metrics)
 
+## Other good reads
+* [Compartmentalizing Code](https://medium.com/@aarontharris/compartmentalizing-code-7d96d40b5586)
+* [Scope - Dependency Injection](https://medium.com/@aarontharris/scope-dependency-injection-6fc25beffc9c)
+
 # Fuel Submodule
 Clone the Fuel submodule under your project folder
 ```
@@ -43,15 +47,15 @@ For Example:
 ```
 public class SampleFuelModule extends FuelModule {
   private final SomePojo myPojo = new SomePojo();
-  
+
   protected void configre() {
     super.configure(); // inherit super bindings -- useful
-    
+
     bind( SomePojo.class, myPojo ); // Anyone that injects SomePojo will get myPojo forever
     bind( SomeOtherPojo.class, new SomeOtherPojo() ); // Same idea as above but cleaner
     bind( SquarePojo.class, GreenSquarePojo.class ); // you may also map interfaces to other interfaces for chaining
     bind( GreenSquarePojo.class, BigGreenSquarePojoImpl.class ); // and interfaces to implementation class or instances to terminate a chain.
-    
+
     // Note: Because BigGreenSquarePojoImpl is just a POJO not an instance and not an @AppSingleton, it will be instantiated every injection.
   }
 }
@@ -70,7 +74,7 @@ public class OrangeBox implements Box {
 public class SampleFuelModule extends FuelModule {
   protected void configre() {
     super.configure(); // inherit super bindings -- useful
-    
+
     bind( Box.class, OrangeBox.class ); // Any injections requesting Box will get a single instance of OrangeBox
   }
 }
@@ -108,7 +112,7 @@ The simplest form of associating a context to an instance.  MyRandomClass knows 
 ```
 public class MyRandomClass {
   private final Lazy<SomeActivitySingleton> mSomeActivitySingleton = Lazy.attain( this, SomeActivitySingleton.class );
-  
+
   public MyRandomClass( Activity activity ) {
     FuelInjector.ignite( activity, this ); // NOTE: associate context to self
   }
@@ -127,10 +131,10 @@ public class SomePojo {
 
 public class MyRandomClass {
   private final Lazy<SomeActivitySingleton> mSomeActivitySingleton = Lazy.attain( this, SomeActivitySingleton.class );
-  
+
   public MyRandomClass( Activity activity ) {
     FuelInjector.ignite( activity, this );
-    
+
     SomePojo pojo = new SomePojo();
     FuelInjector.ignite( this, pojo ); // NOTE: associate self to pojo and pojo inherits context from self
   }
@@ -149,7 +153,7 @@ public class SomePojo {
 
 public class MyRandomClass {
   private final Lazy<SomeActivitySingleton> mSomeActivitySingleton = Lazy.attain( this, SomeActivitySingleton.class ); // NOTE: associate self to injectable
-  
+
   public MyRandomClass( Activity activity ) {
     FuelInjector.ignite( activity, this );
   }
@@ -171,9 +175,9 @@ You may bind a class to a class. (Lowest precedence).
 public class SampleFuelModule extends FuelModule {
   protected void configure() {
     super.configure();
-    
+
     bind( Base.class, Leaf.class ); // Leaf must be derived from Base.
-    
+
     bind( A.class, B.class );
     bind( B.class, C.class );
     bind( C.class, D.class ); // you main chain types if needed, injecting A will result in D.
@@ -195,7 +199,7 @@ To avoid confusion, precedence will always be given to empty constructors if ava
 public class MyClass {
   public MyClass() { // Takes precedence, even if Fuel knows how to obtain SomeThing.
   }
-  
+
   public MyClass( SomeThing arg ) {
     ...
   }
@@ -214,7 +218,7 @@ public class MyClass implements OnFueled {
 
   public MyClass() {
   }
-  
+
   @MainThread
   @Override public void onFueled() {
     someThing.get().doStuff();
@@ -235,7 +239,7 @@ A note to best practices, when injecting inside a provider, its best to use the 
 public class MyClass {
   public MyClass() {
   }
-  
+
   public MyClass( SomeThing arg ) { // Fuel is aware of SomeThing
     ...
   }
@@ -244,9 +248,9 @@ public class MyClass {
 public class SampleFuelModule extends FuelModule {
   protected void configure() {
     super.configure();
-    
+
     bind( SomeThing.class, new SomeThing() );
-    
+
     bind( MyClass.class, new FuelProvider<MyClass>() {
       @Override public MyClass provide( Lazy lazy, Object parent ) {
         Lazy<SomeThing> someThing = Lazy.attain( parent, SomeThing.class );
@@ -257,3 +261,63 @@ public class SampleFuelModule extends FuelModule {
 }
 ```
 ![](https://github.com/aarontharris/Fuel/blob/master/Fuel%20Flow.png)
+
+
+## Submodules
+Allow you to break up the injection bindings. Rather than having all your bindings in one basket, you can place them in appropriate packages for better maintainability.  Within the FuelModule.configure() just call addModule() -- you'll see.
+
+Note: SubModule configuration is processed PRE-ORDER so if you have duplicate mappings, the last entry gets the final say.
+
+## ViewRootSingleton
+### Scope
+If no ViewRoot is defined anywhere on the screen, ViewRootSingletons can still be injected under any View.
+Views that do not fall under a ViewRoot inherit the default ViewRoot.\
+So if no ViewRoot is defined, all Views get the same scope.\
+If your screen is divided in two sections: A & B, and B definves a ViewRoot "b", A still falls under default, therefore A and B will still receive separate instances, so B is still separate as if A had also defined it's own scope.
+
+**Activities are Views too but be careful!**\
+An Activity is a view and if no ViewRoot is defined, then the Activity's view lives in the default ViewRoot.
+You mind find this a convenient way to share a Singelton between an Activity and a View but that would be a poor choice. Remember Views can inject Activity and Application scoped Singletons as well. So if you want share scope between a view and an activity, use an activity scope.
+Why?\
+Because if your goal is to share a scope between an Activity and a View, once you define a ViewRoot, those Views will receive a different Singleton than the Activity and this may not be obvious. Besides, there's no advantage to using a ViewRootSingleton other than scoping between Views, not Activities.
+
+Best practice is to not inject ViewRootSingletons into Activities.\
+Infact, Fuel does not let you do it directly, but there are ways to cheat. So as long as you're not doing anything sketchy, it's probably fine...
+
+**Fragments are Views too!**\
+Actually Fragments are a fine place to put your ViewRoot, unfortunately its not easy because Fragment does not extend View, you cannot simply annotate with @ViewRoot. But you can inform Fuel during the Fragment's onCreateView().
+
+Best practice is to annotate the Fragment w/ @ViewRoot to signal your fellow engineers.\
+And FuelInjector.get().annotateViewRoot(view); Within the Fragment's onCreateView();
+
+**Views are Views!**\
+I actually **GREATLY** prefer CustomViews over Fragments, but to each their own.\
+With Views, if its a CustomView, simply annotate the class with @ViewRoot and that's it, enjoy.\
+However, if it's not your code and you cannot change the class to add @ViewRoot, you may do this programmatically
+after it's been inflated w/ FuelInjector.get().annotateViewRoot(view);  The one gotcha is that you must do this before any of the child views ignite themselves or they will not find the ViewRoot. It sounds tricky but it's not. Just make sure you do it in onCreate() and ignite your views in onAttach and it's not an issue. This is likely rare, most ViewRoots are our own code. Another alternative is to create a CustomView that extends or wraps/composes the CustomView you want to be your ViewRoot but can't edit and add your @ViewRoot to that instead.
+
+
+# DO NOT
+
+## ViewRootSingleton
+- DO NOT detatch a view from one ViewRoot scope and reattach to another. It would be bad.
+  - See: ViewRoot.java for details
+- DO NOT use trickery to inject a ViewRootSingleton into an Activity. It would be bad.
+  - Fuel resists this, but if you try hard enough you could shoot yourself in the foot.
+
+## SubModules
+- DO NOT create a FuelSubmodule as an inner class with references to an Activity or other things you don't want held forever. FuelSubmodules -- like a FuelModule -- are singletons. Therefore everything inside is strongly held for the remainder of the app. #LEAK!  Instead use a FuelProvider and go nuts. FuelProviders are momentary and discarded once they've provided.
+
+
+
+
+## TODO:
+Don't nest viewroots
+- Unprotected - View hierarchy in Android is determined at Runtime so discovering this would be a bit of overhead at runtime. You can, however, turn on a debug flag to call this out when in debug mode.
+
+- Best practice is to not annotate your custom views here or there based on what you think they will do. Instead it's best to create one empty CustomView, name it "MyViewRoot" (or something) and annotate it.  Then when you want view scoping, just insert that at the root of your tree, or at the root of each section etc.
+
+Don't double map singeltons
+- Protected
+
+

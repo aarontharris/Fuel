@@ -26,7 +26,7 @@ class CacheKey {
     }
 
     public static CacheKey attain( Lazy lazy ) {
-        return new CacheKey( lazy.leafType, lazy.getFlavor() );
+        return new CacheKey(lazy.getLeafType(), lazy.getFlavor() );
     }
 
     public Class<?> getLeafType() {
