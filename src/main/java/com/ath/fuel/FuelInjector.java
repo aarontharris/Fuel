@@ -11,7 +11,6 @@ import android.view.View;
 import androidx.annotation.MainThread;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
-import androidx.annotation.VisibleForTesting;
 import androidx.core.util.Preconditions;
 
 import com.ath.fuel.err.FuelInjectionException;
@@ -37,7 +36,7 @@ public final class FuelInjector {
     private static final Map<Class, Boolean> isAppSingletonCache = new HashMap<>();
     private static final Map<Class, Boolean> isSingletonCache = new HashMap<>();
     private static final Map<Class, Boolean> isActSingletonCache = new HashMap<>();
-    private static final Map<Class, Boolean> isFragSingletonCache = new HashMap<>();
+    private static final Map<Class, Boolean> isViewRootSingletonCache = new HashMap<>();
     private static final Map<Class, Boolean> isAppCache = new HashMap<>();
     private static final Map<Class, Boolean> isActCache = new HashMap<>();
     private static final Map<Class, Boolean> isFragCache = new HashMap<>();
@@ -62,77 +61,15 @@ public final class FuelInjector {
     private FuelInjector() {
     }
 
-    /**
-     * Associate the given {@link FuelModule} to the {@link FuelInjector}<br>
-     * The {@link FuelInjector} will behave based on the {@link FuelModule} overrides allowing
-     * for detailed customization or alternate bindings between Test, Debug and Release flavored modules.<br>
-     * <br>
-     * Required to be called before any injections are expected to work.<br>
-     * Best to call from App.onCreate()
-     */
-    @MainThread
-    private final void initializeModule(Object owner, FuelModule fuelModule) throws FuelUnableToObtainContextException, FuelScopeViolationException {
-        //initializeModule(owner, fuelModule, false);
-    }
-
-
-    @VisibleForTesting
-    @MainThread
-    private final void initializeModule(Object owner, FuelSubmodule fuelModule, boolean insertAtFront) throws FuelUnableToObtainContextException, FuelScopeViolationException {
-        if (insertAtFront && isInitialized()) {
-            throw new UnsupportedOperationException("insertAtFront not supported yet");
-        /*
-            TODO: inserAtFront for testing
-            //FLog.w("initializeModules called again -- be careful!");
-            // We do this to support resetting the the fuel module for testing
-            // anything that was registered can now unregister itself before death
-            // its not pretty but it works
-
-            // REMOVE callbacks from the old root as we only maintain one set of callbacks per tree and then delegate down
-
-            //if (injector.rootModule != null) { injector.rootModule.prepareForDeath(); }
-            FuelModule prev = injector.rootModule;
-            injector.rootModule = rootModule;
-            injector.rootModule.addSubModule(prev);
-         */
-        }
-
-        if (!isInitialized()) {
-
-            // TODO: make sure the owner is App
-            // TODO: associate owner to module
-
-            // this is our first module
-
-            //noinspection AccessStaticViaInstance
-            mainThreadId = Thread.currentThread().getId();
-            injector.rootModule = fuelModule;
-        } else {
-            fuelModule.addSubModule(fuelModule);
-        }
-
-        fuelModule.configure();
-    }
-
     @MainThread
     public final void ignite(@NonNull Application app, @NonNull FuelModule rootModule) {
         if (this.rootModule == null) {
             this.rootModule = rootModule;
             this.app = app;
             mainThreadId = Thread.currentThread().getId();
-            this.rootModule.configure();
+            this.rootModule.configure(app);
             ignite(app, app);
         }
-    }
-
-    @MainThread
-    public final void ignite(@NonNull Application app, @NonNull FuelSubmodule module) {
-        if (getRootModule().containsModule(module)) {
-            return;
-        }
-        getRootModule().addSubModule(module);
-        module.configure();
-        ignite(app, app);
     }
 
     @MainThread
@@ -141,21 +78,8 @@ public final class FuelInjector {
     }
 
     @MainThread
-    public final void ignite(@NonNull Activity activity, @NonNull FuelSubmodule module) {
-        ignite(activity);
-    }
-
-    @MainThread
     public final void ignite(@NonNull Activity activity) {
         ignite(activity, activity);
-    }
-
-    @MainThread
-    public final void ignite(@NonNull View view, @NonNull FuelSubmodule module) {
-        if (view.isInEditMode()) {
-            return; // Bail out if in edit mode
-        }
-        ignite(view);
     }
 
     @MainThread
@@ -270,7 +194,7 @@ public final class FuelInjector {
     }
 
     /**
-     * @return True after {@link #initializeModule(Object, FuelModule)}
+     * @return True after {@link #ignite(Application, FuelModule)}
      */
     public boolean isInitialized() {
         return rootModule != null;
@@ -305,6 +229,15 @@ public final class FuelInjector {
         if (singleton == null) {
             singleton = leafType.isAnnotationPresent(ActivitySingleton.class);
             isActSingletonCache.put(leafType, singleton);
+        }
+        return singleton;
+    }
+
+    final boolean isViewRootSingleton(Class<?> leafType) {
+        Boolean singleton = isViewRootSingletonCache.get(leafType);
+        if (singleton == null) {
+            singleton = leafType.isAnnotationPresent(ViewRootSingleton.class);
+            isViewRootSingletonCache.put(leafType, singleton);
         }
         return singleton;
     }

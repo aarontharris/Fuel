@@ -118,7 +118,6 @@ public final class Lazy<T> {
     private final Integer flavor;
     private boolean isInEditMode;
     private boolean debug;
-    private FuelModule module;
     private final boolean ignited;
 
     private Lazy(@NonNull Object parent, @NonNull Class<T> type) {
@@ -135,14 +134,6 @@ public final class Lazy<T> {
 
     void inheritScopeRef(Lazy parent) {
         this.scopeObjectRef = parent.scopeObjectRef;
-    }
-
-    void setModule(@NonNull FuelModule module) {
-        this.module = module;
-    }
-
-    public @Nullable FuelModule getModule() {
-        return module;
     }
 
     /**
@@ -180,7 +171,7 @@ public final class Lazy<T> {
         return toCacheScope() != null && toObjectScope() != null;
     }
 
-    public Lazy setDebug() {
+    Lazy setDebug() {
         this.debug = true;
         return this;
     }
@@ -264,21 +255,28 @@ public final class Lazy<T> {
     }
 
     /**
-     * @throws NullPointerException when {@link #getLeafType()} is unavailable
+     * @throws NullPointerException when the defining class has not yet been ignited
      */
     public boolean isAppSingleton() {
         return FuelInjector.get().isAppSingleton(getLeafType());
     }
 
     /**
-     * @throws NullPointerException when {@link #getLeafType()} is unavailable
+     * @throws NullPointerException when the defining class has not yet been ignited
      */
     public boolean isActivitySingleton() {
         return FuelInjector.get().isActivitySingleton(getLeafType());
     }
 
     /**
-     * @throws NullPointerException when {@link #getLeafType()} is unavailable
+     * @throws NullPointerException when the defining class has not yet been ignited
+     */
+    public boolean isViewRootSingleton() {
+        return FuelInjector.get().isViewRootSingleton(getLeafType());
+    }
+
+    /**
+     * @throws NullPointerException when the defining class has not yet been ignited
      */
     public boolean isSingleton() {
         return FuelInjector.get().isSingleton(getLeafType());

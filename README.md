@@ -257,3 +257,14 @@ public class SampleFuelModule extends FuelModule {
 }
 ```
 ![](https://github.com/aarontharris/Fuel/blob/master/Fuel%20Flow.png)
+
+
+
+# DO NOT
+
+## ViewRootSingleton
+- DO NOT detatch a view from one ViewRoot scope and reattach to another. It will be bad.
+  - See: ViewRoot.java for details
+
+## SubModules
+- DO NOT create a FuelSubmodule as an inner class with references to an Activity or other things you don't want held forever. FuelSubmodules -- like a FuelModule -- are singletons. Therefore everything inside is strongly held for the remainder of the app. #LEAK!  Instead use a FuelProvider and go nuts. FuelProviders are momentary and discarded once they've provided.

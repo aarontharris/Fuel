@@ -24,6 +24,7 @@ import com.ath.fuel.err.FuelInjectionException;
 import com.ath.fuel.err.FuelUnableToObtainInstanceException;
 
 import java.lang.reflect.Constructor;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -31,11 +32,11 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.WeakHashMap;
-import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 
 public abstract class FuelModule {
+
 
     /**
      * Provider is cached with the context associated with the type it returns<br>
@@ -59,6 +60,10 @@ public abstract class FuelModule {
         T provide(Lazy lazy, Object parent);
     }
 
+    public interface FuelSubmodule {
+        void configure(@NonNull FuelConfigurator module);
+    }
+
     // Scope -> ScopeObject -> CacheKey -> instance
     // - Scope is Application, Activity, Fragment, etc
     // - ScopeObject would be the context, or the fragment, paired to the scope
@@ -72,22 +77,12 @@ public abstract class FuelModule {
     private final @NonNull Map<Class<?>, Object> classToObjectMap = new HashMap<>();
     private final @NonNull Map<Class<?>, FuelProvider> classToProviderMap = new HashMap<>();
     private final @NonNull Set<Class<?>> classMaps = new HashSet<>();
+    private final @NonNull List<FuelSubmodule> submodules = new ArrayList<>();
     private final @NonNull Application app;
-
-    private final @NonNull List<FuelModule> submodules = new CopyOnWriteArrayList<>(); // FIXME: Submodule - WeakRef
-    @Nullable FuelModule parent = null; // FIXME: Submodule - WeakRef
+    private FuelConfigurator fuelConfigurator = null;
 
     /* package private */
     Application.ActivityLifecycleCallbacks localLifecycleCallbacks;
-
-    /**
-     * @param app
-     * @param context - WeakRef
-     */
-    FuelModule(@NonNull Application app, @NonNull Context context) {
-        this.app = app;
-
-    }
 
     public FuelModule(@NonNull Application app) {
         this.app = app;
@@ -167,21 +162,6 @@ public abstract class FuelModule {
      */
     protected @NonNull <T> T onInstanceCreated(@NonNull Lazy<T> lazy) {
         return lazy.getInstance();
-    }
-
-    boolean containsModule(@NonNull FuelSubmodule module) {
-        return this.submodules.contains(module);
-    }
-
-    void addSubModule(@NonNull FuelSubmodule module) {
-        this.submodules.add(module); // FIXME: Submodule - WeakRef
-        module.parent = this; // FIXME: Submodule - WeakRef
-    }
-
-    void remSubmodule(@NonNull FuelSubmodule module) {
-        this.submodules.remove(module);
-        module.parent = null;
-        // FIXME: Submodule - destroy all children
     }
 
     /**
@@ -350,7 +330,7 @@ public abstract class FuelModule {
      *   {@link Application} -- Will only inject Application, unlike Context
      * </pre>
      */
-    protected void configure() {
+    protected void configure(@NonNull Application app) {
         // Services
         bind(LayoutInflater.class, getApplication().getSystemService(Context.LAYOUT_INFLATER_SERVICE));
         bind(ConnectivityManager.class, getApplication().getSystemService(Context.CONNECTIVITY_SERVICE));
@@ -464,6 +444,14 @@ public abstract class FuelModule {
         classMaps.add(from);
     }
 
+    protected void addModule(@NonNull FuelSubmodule submodule) {
+        if (fuelConfigurator == null) {
+            fuelConfigurator = new FuelConfigurator(this);
+        }
+        submodule.configure(fuelConfigurator);
+        submodules.add(submodule);
+    }
+
     Application getApplication() {
         return app;
     }
@@ -471,7 +459,7 @@ public abstract class FuelModule {
     // FIXME: consider other mappings above
     // FIXME: cleanup exceptions
 
-    public final FuelProvider REFLECTIVE_PROVIDER = new FuelProvider() {
+    public final @NonNull FuelProvider REFLECTIVE_PROVIDER = new FuelProvider() {
         @Override public Object provide(Lazy lazy, Object parent) {
             return newInstance(FuelModule.this, lazy);
         }
@@ -692,16 +680,16 @@ public abstract class FuelModule {
      * @return
      */
     // Must stay logically paired with obtainInstance -- not super cool but ... for now.
-    @NonNull <T> Class<? extends T> getType(Class<T> baseType, Integer flavor) { // FIXME: Submodule
+    @NonNull <T> Class<? extends T> getType(Class<T> baseType, Integer flavor) {
         Object obj = classToObjectMap.get(baseType);
         if (obj != null) {
             //noinspection unchecked
-            return (Class<? extends T>) obj.getClass();
+            return (Class<? extends T>) obj.getClass(); // reaching an instance is the end of a trail.
         }
 
         FuelProvider<?> provider = classToProviderMap.get(baseType);
         if (provider != null) {
-            return baseType;
+            return baseType; // reaching a provider is the end of the trail.
         }
 
         Class<?> toType = classToClassMap.get(baseType);
@@ -709,7 +697,7 @@ public abstract class FuelModule {
             return (Class<? extends T>) getType(toType, flavor); // Recursive check
         }
 
-        return baseType;
+        return baseType; // no further mappings -- must be the end of the trail.
     }
 
     /**
@@ -760,21 +748,10 @@ public abstract class FuelModule {
     }
 
 
-    @NonNull FuelModule findModule(@NonNull Lazy<?> lazy) { // FIXME: Submodule
-        // FIXME
-
-        if (lazy.getModule() != null) {
-            return lazy.getModule();
-        }
-
-        Object parent = lazy.getParent();
-        if (parent != null) {
-            Lazy<?> lazyParent = FuelInjector.get().findLazyByInstance(parent);
-        }
-
-
+    @NonNull FuelModule findModule(@NonNull Lazy<?> lazy) {
         return FuelInjector.get().getRootModule();
     }
+
 
     // safe because we hash by type
     @SuppressWarnings("unchecked") final <T> T newInstance(CacheKey key, @NonNull Lazy lazy, boolean allowAnonymousNewInstance) throws FuelInjectionException {
