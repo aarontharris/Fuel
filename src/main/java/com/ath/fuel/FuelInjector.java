@@ -100,6 +100,8 @@ public final class FuelInjector {
      * NOTE:<br>
      * You may skip ignite() when a the object has is mapped to a context via {@link FuelModule#provideContext(Object)}<br>
      * One exception to this rule is that injections are always queued up until Fuel has been initialized.<br>
+     * <br>
+     * Should be OK to call multiple times on the same context & instance<br>
      */
     @MainThread
     public final void ignite(@NonNull Context context, @NonNull Object instance) {
@@ -143,16 +145,16 @@ public final class FuelInjector {
         }
     }
 
-    static final Object SENTINEL = new Object();
+    static final Object VIEW_ROOT_SENTINEL = new Object();
 
     public final @NonNull View igniteViewRoot(@NonNull View view) {
-        view.setTag(R.id.fuel_view_root, SENTINEL);
+        view.setTag(R.id.fuel_view_root, VIEW_ROOT_SENTINEL);
         ignite(view);
         return view;
     }
 
     public final @NonNull View igniteViewRootFragment(@NonNull View view, Fragment fragment) {
-        view.setTag(R.id.fuel_view_root, SENTINEL);
+        view.setTag(R.id.fuel_view_root, VIEW_ROOT_SENTINEL);
         FragmentViewMaps.get(view.getContext()).associate(view, fragment);
         ignite(view.getContext(), fragment);
         return view;

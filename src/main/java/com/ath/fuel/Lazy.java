@@ -174,7 +174,7 @@ public final class Lazy<T> {
             View view = (View) parent;
             while (view != null) {
                 if (view instanceof View) {
-                    if (view.getTag(R.id.fuel_view_root) == FuelInjector.SENTINEL) {
+                    if (view.getTag(R.id.fuel_view_root) == FuelInjector.VIEW_ROOT_SENTINEL) {
                         return view;
                     }
                     view = (View) view.getParent();
